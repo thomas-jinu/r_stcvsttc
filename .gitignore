@@ -1,0 +1,17 @@
+# This repository tracks source code only.
+# Project inputs, data, notes, presentations, and generated outputs remain local.
+*
+
+**/__pycache__/
+*.py[cod]
+
+
+!.gitignore
+
+# Source-code directories and files
+!code/
+!code/**/
+!code/**/*.py
+!code/**/*.jl
+!code/**/*.pl
+!code/**/*.pbs
