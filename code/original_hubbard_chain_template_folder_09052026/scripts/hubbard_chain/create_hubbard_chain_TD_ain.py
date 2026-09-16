@@ -18,7 +18,7 @@ import conda_dmrg  # type: ignore
 
 # Default path to the DMRG++ executable (update as needed for your system)
 DMRG_EXECUTABLE_SOURCE_local = Path(
-    "/Users/qqt/Documents/Codes/dmrgpp/installdir/bin/dmrg"
+    "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
 )
 DMRG_EXECUTABLE_SOURCE_isaac = Path(
     "/nfs/home/jthom214/dmrgpp/programs_08192026/dmrgpp/installdir/bin/dmrg"
