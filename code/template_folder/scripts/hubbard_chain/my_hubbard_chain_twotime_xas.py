@@ -1,8 +1,9 @@
-"""Generate and optionally run a DMRG++ Hubbard-chain ground state.
+"""
+Generate and optionally run a two-time Green's function calculation for the Hubbard chain using DMRG++.
 
 Run this script from above the directory containing the ``dmrgpp`` scripts,
 or adjust the project-root discovery below if your package layout differs.
-"""
+"""  # noqa: EXE002
 
 import argparse
 import csv
@@ -14,13 +15,18 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# Resolve paths so that scripts live inside scripts/hubbard_chain, and the project root is two levels up.
+"""
+Resolve paths so that scripts live inside scripts/hubbard_chain, and the project root is two levels up.
+"""
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[1]  # two level up to the project root
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Location of the current DMRG++ executables for different clusters. Adjust these paths as needed. The location is printed when the script is completed.
+
+"""
+Location of the current DMRG++ executables for different clusters.
+"""
 DMRG_EXECUTABLES = {
     "local": Path(
         "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
@@ -33,8 +39,11 @@ DMRG_EXECUTABLES = {
 }
 
 
-# Define all the input arguments for the script, including the cluster choice and the --run flag.
 def parse_args_input() -> argparse.Namespace:
+    """
+    Parse command-line arguments for the script, including the cluster choice and the --run flag.
+    """
+
     parser = argparse.ArgumentParser(
         description="Generate and optionally run a DMRG++ Hubbard-chain calculation.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -46,17 +55,22 @@ def parse_args_input() -> argparse.Namespace:
         """,
     )
     parser.add_argument("sites", type=int, help="Chain length N")
-    parser.add_argument("up", type=int)
-    parser.add_argument("down", type=int)
-    parser.add_argument("center_site", type=int)
-    parser.add_argument("t", type=float)
-    parser.add_argument("U", type=float)
-    parser.add_argument("potential_V", type=float)
+    parser.add_argument("up", type=int, help="Number of spin-up electrons")
+    parser.add_argument("down", type=int, help="Number of spin-down electrons")
+    parser.add_argument("center_site", type=int, help="Index of the center site")
+    parser.add_argument("t", type=float, help="Hopping parameter t")
+    parser.add_argument("U", type=float, help="Hubbard interaction U")
+    parser.add_argument("potentialV", type=float, help="Potential V")
+    parser.add_argument("potentiaV_XAS", type=float, help="Potential V for XAS")
+    parser.add_argument("gs_filename", type=str, help="Ground file location")
     parser.add_argument(
-        "gs_filename", type=str, help="Ground state filename for the calculation"
+        "finite_kept", type=int, help="Number of states in finite loops"
     )
-    parser.add_argument("finite_kept", type=int)
-    parser.add_argument("finite_loops_insert", type=int)
+    parser.add_argument(
+        "finite_loops_apply",
+        type=int,
+        help="Number of finite loops for applying the operator step",
+    )
     parser.add_argument(
         "TSPAdvanceEach",
         type=int,
@@ -78,9 +92,13 @@ def parse_args_input() -> argparse.Namespace:
 
 
 def build_input(args: argparse.Namespace, run_name: str) -> str:
+    """
+    Builds the time-dependent input for the DMRG++ calculation and uses recoveryenable read to create reference states for each time step.
+    """
 
-    # If GS finite loop is even, add 2 more. If it is add just add 1 more.
-    # First loop is from time 0 to
+    # The time axis should be from [0, T_max] with odd number of timesteps.
+    # The Finite loops is 1 less than the number of timesteps, since the first step is the ground state.
+
     finite_loops = (
         args.Pump_time_steps * (args.TSPAdvanceEach // (args.sites - 2)) - 1
     )  # Total number of finite loops
@@ -88,6 +106,8 @@ def build_input(args: argparse.Namespace, run_name: str) -> str:
     finite_rows = ",\n".join(
         f"    [@auto, {args.finite_kept}, 3]" for _ in range(finite_loops)
     )
+
+    # Generate the pump table for the time-dependent calculation.
 
     time_axis = create_time_axis(
         nsteps=args.Pump_time_steps,
@@ -106,6 +126,7 @@ def build_input(args: argparse.Namespace, run_name: str) -> str:
         f"    [{time:.15g}, {pump:.15g}]," for time, pump in zip(time_axis, pump_axis)
     ).rstrip(",")
 
+    # return the Ainur input as a string written to file in the main function.
     return (
         "\n\n".join(
             [
@@ -120,7 +141,7 @@ def build_input(args: argparse.Namespace, run_name: str) -> str:
                         'GeometryOptions = "ConstantValues";',
                         f"dir0:Connectors = [{args.t}];",
                         f"hubbardU = [{args.U}, ...];",
-                        f"potentialV = [{args.potential_V}, ...];",
+                        f"potentialV = [{args.potentialV}, ...];",
                         'Model = "HubbardOneBand";',
                     ]
                 ),
@@ -154,12 +175,12 @@ def build_input(args: argparse.Namespace, run_name: str) -> str:
                 "\n".join(
                     [
                         "# --- Solver / run control ---",
-                        'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression,recoveryEnableRead";',
+                        'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression";',
                         'Version = "stc_vs_ttc";',
                         f'string RecoverySave = "%l%%1,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
                         f'RestartFilename = "../{Path(args.gs_filename).resolve().name}";',
-                        "GsWeight = 0.2;",
+                        "GsWeight = 0.1;",
                     ]
                 ),
             ]
@@ -168,18 +189,35 @@ def build_input(args: argparse.Namespace, run_name: str) -> str:
     )
 
 
-def build_input_insert(
+def build_input_apply(
     args: argparse.Namespace,
     run_name: str,
     time_axis,
     pump_axis,
     step: int,
-    restart_filename_insert: str,
+    restart_filename_apply: str,
 ) -> str:
+    """
+    Apply the operator to create the initial state for time evolution at a specific time step.
+    """
 
+    # Finite rows for the apply step.
     finite_rows = ",\n".join(
-        f"    [@auto, {args.finite_kept}, 2]" for _ in range(args.finite_loops_insert)
+        f"    [@auto, {args.finite_kept}, 2]" for _ in range(args.finite_loops_apply)
     )
+
+    # Generate the pump table at the specific time step.
+    AversusT_table = f"    [{time_axis[step]:.15g}, {pump_axis[step]:.15g}]"
+
+    if step == 0:
+        targeting_expression = [
+            f'string P0="c\'[{args.center_site}]*|gs>";',
+        ]
+    else:
+        targeting_expression = [
+            "string P0 =|P0>;",
+            f'string P1 = "c\'[{args.center_site}]*|P0>";',
+        ]
 
     return (
         "\n\n".join(
@@ -195,14 +233,17 @@ def build_input_insert(
                         'GeometryOptions = "ConstantValues";',
                         f"dir0:Connectors = [{args.t}];",
                         f"hubbardU = [{args.U}, ...];",
-                        f"potentialV = [{args.potential_V}, ...];",
+                        f"potentialV = [{args.potentialV}, ...];",
                         'Model = "HubbardOneBand";',
                     ]
                 ),
                 "\n".join(
                     [
                         "# --- Pump parameters --- #",
-                        f"GeometryFactor = exp:*:1.0i:{pump_axis[step]};",
+                        "matrix AversusTime = [",
+                        f"{AversusT_table}",
+                        "];",
+                        f"GeometryFactor = exp:*:1.0i:!readTableAversusTime,{time_axis[step]:.15g};",
                     ]
                 ),
                 "\n".join(
@@ -219,20 +260,18 @@ def build_input_insert(
                         "FiniteLoops = [",
                         finite_rows,
                         "];",
-                        "RestartMappingTvs=[0, -1];",
                         "RestartMapStages=0;",
-                        "string P0 =|P0>;",
-                        f'string P1= "c\'[{args.center_site}]*|P0>";',
+                        *targeting_expression,
                     ]
                 ),
                 "\n".join(
                     [
                         "# --- Solver / run control ---",
                         'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression";',
-                        'Version = "stc_vs_ttc_insert";',
-                        f'OutputFile = "{run_name}_insert";',
-                        f'RestartFilename = "{restart_filename_insert}";',
-                        "GsWeight = 0.2;",
+                        'Version = "stc_vs_ttc_apply";',
+                        f'OutputFile = "{run_name}_apply";',
+                        f'RestartFilename = "{restart_filename_apply}";',
+                        "GsWeight = 0.1;",
                     ]
                 ),
             ]
@@ -241,7 +280,7 @@ def build_input_insert(
     )
 
 
-def build_input_evolve(
+def build_input_evolve_1(
     args: argparse.Namespace,
     run_name: str,
     time_axis,
@@ -249,18 +288,74 @@ def build_input_evolve(
     step: int,
     restart_filename_evolve: str,
 ) -> str:
+    """
+    Build the input for the time evolution step after applying the operator.
+    """
 
-    finite_loops = (
-        len(time_axis) * (args.TSPAdvanceEach // (args.sites - 2)) - 1
-    )  # Total number of finite loops
+    potentialV_XAS = args.potentiaV_XAS
 
-    finite_rows = ",\n".join(
-        f"    [@auto, {args.finite_kept}, 2]" for _ in range(finite_loops)
-    )
+    # Logic to capture the last time step and avoid time evolution if there is only one time step left.
+    if len(time_axis[step:]) == 1:
+        # The number of finite loops for the time evolution is determined by the remaining time steps after the current step.
+        finite_loops = args.TSPAdvanceEach // (args.sites - 2)  # Last loop!
 
-    AversusT_table = "\n".join(
-        f"    [{time:.15g}, {pump:.15g}]," for time, pump in zip(time_axis, pump_axis)
-    ).rstrip(",")
+        finite_rows = ",\n".join(
+            f"    [@auto, {args.finite_kept}, 2]" for _ in range(finite_loops)
+        )
+
+        AversusT_table = f"    [{time_axis[step]:.15g}, {pump_axis[step]:.15g}]"
+
+        targeting_expression = [
+            "RestartMappingTvs=[0, 1, -1, -1];",
+            'string P0="|P0>";',
+            'string P1="|P1>";',
+            'string P2="|P0>";',
+            'string P3="|P1>";',
+        ]
+    elif step == 0:
+        # The number of finite loops for the time evolution is determined by the remaining time steps after the current step.
+        finite_loops = (
+            len(time_axis[step:]) * (args.TSPAdvanceEach // (args.sites - 2)) - 1
+        )  # Total number of finite loops
+
+        finite_rows = ",\n".join(
+            f"    [@auto, {args.finite_kept}, 2]" for _ in range(finite_loops)
+        )
+
+        AversusT_table = "\n".join(
+            f"    [{time:.15g}, {pump:.15g}],"
+            for time, pump in zip(time_axis[step:], pump_axis[step:])
+        ).rstrip(",")
+
+        targeting_expression = [
+            "RestartMappingTvs=[0, -1, -1];",
+            'string P0="|P0>";',
+            f'string P1="TimeEvolve{{tau={args.TSPTau},steps=5,advanceEach={args.TSPAdvanceEach}}}*|gs>";',
+            f'string P2="TimeEvolve{{tau={args.TSPTau},steps=5,advanceEach={args.TSPAdvanceEach}}}*|P1>";',
+        ]
+
+    else:
+        # The number of finite loops for the time evolution is determined by the remaining time steps after the current step.
+        finite_loops = (
+            len(time_axis[step:]) * (args.TSPAdvanceEach // (args.sites - 2)) - 1
+        )  # Total number of finite loops
+
+        finite_rows = ",\n".join(
+            f"    [@auto, {args.finite_kept}, 2]" for _ in range(finite_loops)
+        )
+
+        AversusT_table = "\n".join(
+            f"    [{time:.15g}, {pump:.15g}],"
+            for time, pump in zip(time_axis[step:], pump_axis[step:])
+        ).rstrip(",")
+
+        targeting_expression = [
+            "RestartMappingTvs=[0, 1, -1, -1];",
+            'string P0="|P0>";',
+            'string P1="|P1>";',
+            f'string P2="TimeEvolve{{tau={args.TSPTau},steps=5,advanceEach={args.TSPAdvanceEach}}}*|P0>";',
+            f'string P3="TimeEvolve{{tau={args.TSPTau},steps=5,advanceEach={args.TSPAdvanceEach}}}*|P1>";',
+        ]
 
     return (
         "\n\n".join(
@@ -276,7 +371,7 @@ def build_input_evolve(
                         'GeometryOptions = "ConstantValues";',
                         f"dir0:Connectors = [{args.t}];",
                         f"hubbardU = [{args.U}, ...];",
-                        f"potentialV = [{args.potential_V}, ...];",
+                        f"potentialV = [{args.potentialV}, ...];",
                         'Model = "HubbardOneBand";',
                     ]
                 ),
@@ -304,21 +399,17 @@ def build_input_evolve(
                         finite_rows,
                         "];",
                         "RestartMapStages=0;",
-                        "RestartMappingTvs=[0, 1, -1, -1];",
-                        'string P0="|P0>";',
-                        'string P1="|P1>";',
-                        f'string P2="TimeEvolve{{tau={args.TSPTau},steps=5,advanceEach={args.TSPAdvanceEach}}}*|P0>";',
-                        f'string P3="TimeEvolve{{tau={args.TSPTau},steps=5,advanceEach={args.TSPAdvanceEach}}}*|P1>";',
+                        *targeting_expression,
                     ]
                 ),
                 "\n".join(
                     [
                         "# --- Solver / run control ---",
                         'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression,minimizedisk";',
-                        'Version = "stc_vs_ttc_insert_evolve";',
+                        'Version = "stc_vs_ttc_apply_evolve";',
                         f'OutputFile = "{run_name}_evolve";',
                         f'RestartFilename = "{restart_filename_evolve}";',
-                        "GsWeight = 0.2;",
+                        "GsWeight = 0.1;",
                     ]
                 ),
             ]
@@ -327,17 +418,12 @@ def build_input_evolve(
     )
 
 
-def parse_args_slurm() -> argparse.Namespace:
-
-    parser = argparse.ArgumentParser(
-        description="Parse arguments for the Slurm script.",
-    )
-    parser.add_argument("cluster", choices=["local", "isaac", "nersc"])
-    # parser.add_argument("--gpu", action="store_true", help="Use GPU.")
-    return parser.parse_args()
-
-
 def main() -> int:  # type: ignore
+    """
+    Creates the scripts for the full two-time Green's function calculation, including the pump table and the input files for each step.
+    Stage 1: Create reference states for each time step using recoveryenable read.
+    Stage 2: Create folders for each time step, apply the operator to create the initial state for time evolution, and generate the input files for the time evolution.
+    """
 
     args = parse_args_input()
 
@@ -348,21 +434,20 @@ def main() -> int:  # type: ignore
     - recoveryenable read index 0 is for the first timestep = TspTau
     """
 
-    # Create Reference states for each t^prime
-
+    # Create the folder;
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     run_name = f"N={args.sites}_Nup={args.up}_Ndown={args.down}_{timestamp}"
     restart_path = Path(args.gs_filename).resolve()
-    run_folder_td = restart_path.parent / "td"
+    run_folder_td = restart_path.parent / f"td_{run_name}"
     run_folder_td.mkdir(parents=True, exist_ok=True)
-    print(f"Created run folder: {run_folder_td}")
+    print(f"Created run folder: {run_folder_td}\n")
 
+    # Copy the DMRG++ executable to the run folder;
     executable_path = DMRG_EXECUTABLES[args.cluster]
     print(f"Using DMRG++ executable for cluster '{args.cluster}': {executable_path}")
     shutil.copy2(executable_path, run_folder_td / "dmrg")
 
     # Create the pump table and write it to a CSV file in the run folder.
-
     time_axis = create_time_axis(
         nsteps=args.Pump_time_steps,
         step_size=args.TSPTau,
@@ -381,10 +466,12 @@ def main() -> int:  # type: ignore
         output_path=run_folder_td / "pump_table.csv",
     )
 
+    # Create stage 1 input file for Ainur and write it to the run folder.
     input_path = run_folder_td / f"input_{run_name}.ain"
     input_path.write_text(build_input(args, run_name), encoding="utf-8")
     print(f"Wrote Ainur input: {input_path}")
 
+    # If --run is specified, execute DMRG++ with the generated input. If a cluster is specified, create a SLURM batch script for submission.
     if args.run:
         subprocess.run(
             ["./dmrg", "-f", str(input_path), "-p", "12"],
@@ -402,56 +489,57 @@ def main() -> int:  # type: ignore
 
     """
     Stage 2
-    - Create folders for each t^prime.
+    - Create folders for each t^prime inside the twotime folder.
     - Apply operator to create the initial state for time evolution.
     - Inputs to timeevolve to T_max.
     """
-    run_folder_twotime = restart_path.parent / "twotime"
+
+    # Create the twotime folder
+    run_folder_twotime = restart_path.parent / f"twotime_{run_name}"
     run_folder_twotime.mkdir(parents=True, exist_ok=True)
     print(f"Created run folder: {run_folder_twotime}")
 
+    # Loop over each time step, create a folder for that step, copy the DMRG++ executable, and generate the input files for applying the operator and evolving the state.
     for step in range(args.Pump_time_steps):
         step_folder = run_folder_twotime / f"step_{step:04d}"
         step_folder.mkdir(exist_ok=True)
-        # shutil.copy2(restart_path, step_folder / restart_path.name)
-        # print(f"Created step folder: {step_folder} and copied restart file.")
-
+        print(f"Created step folder: {step_folder}")
         executable_path = DMRG_EXECUTABLES[args.cluster]
         print(
             f"Using DMRG++ executable for cluster '{args.cluster}': {executable_path}"
         )
         shutil.copy2(executable_path, step_folder / "dmrg")
 
-        input_path_restart = step_folder / f"input_{run_name}.ain"
-
+        # Determine the restart filename based on the current step.
         if step != 0:
             recoveryindex = int(step - 1)
-            restart_filename = f"../../td/Recovery{recoveryindex}{run_name}"
+            restart_filename = f"../../td_{run_name}/Recovery{recoveryindex}{run_name}"
         else:
             restart_filename = f"../../{Path(args.gs_filename).resolve().name}"
 
+        # Create the input files for applying the operator and evolving the state, and write them to the step folder.
+        input_path_restart = step_folder / f"input_{run_name}_apply.ain"
         input_path_restart.write_text(
-            build_input_insert(
+            build_input_apply(
                 args,
                 run_name,
                 step=step,
                 time_axis=time_axis,
                 pump_axis=pump_axis,
-                restart_filename_insert=restart_filename,
+                restart_filename_apply=restart_filename,
             ),
             encoding="utf-8",
         )
 
         input_path_evolve = step_folder / f"input_{run_name}_evolve.ain"
-
         input_path_evolve.write_text(
             build_input_evolve(
                 args,
                 run_name,
                 step=step,
-                time_axis=time_axis[step:],
-                pump_axis=pump_axis[step:],
-                restart_filename_evolve=run_name + "_insert",
+                time_axis=time_axis,
+                pump_axis=pump_axis,
+                restart_filename_evolve=run_name + "_apply",
             ),
             encoding="utf-8",
         )
@@ -459,17 +547,26 @@ def main() -> int:  # type: ignore
         print(f"Wrote Ainur input: {input_path_restart}")
         print(f"Wrote Ainur input: {input_path_evolve}")
 
+        # If --run is specified, execute DMRG++ with the generated input files for applying the operator and evolving the state. If a cluster is specified, create a SLURM batch script for submission.
         if args.run:
             subprocess.run(
                 ["./dmrg", "-f", str(input_path_restart), "-p", "12"],
                 cwd=step_folder,
                 check=True,
             )
-            subprocess.run(
-                ["./dmrg", "-f", str(input_path_evolve), "-p", "12"],
-                cwd=step_folder,
-                check=True,
-            )
+
+            if step == 0:
+                subprocess.run(
+                    ["./dmrg", "-f", str(input_path_evolve), "-p", "12", "<P1|c|P2>"],
+                    cwd=step_folder,
+                    check=True,
+                )
+            else:
+                subprocess.run(
+                    ["./dmrg", "-f", str(input_path_evolve), "-p", "12", "<P2|c|P3>"],
+                    cwd=step_folder,
+                    check=True,
+                )
         elif args.cluster != "local":
             # args_slurm = parse_args_slurm()
             slurm_path = run_folder_twotime / f"batch_{run_name}.slurm"
@@ -480,6 +577,19 @@ def main() -> int:  # type: ignore
             print("Input generated. Use --run to start DMRG++.")
 
     return 0
+
+
+def parse_args_slurm() -> argparse.Namespace:
+
+    parser = argparse.ArgumentParser(
+        description="Parse arguments for the Slurm script.",
+    )
+    parser.add_argument("cluster", choices=["local", "isaac", "nersc"])
+    # parser.add_argument("--gpu", action="store_true", help="Use GPU.")
+    return parser.parse_args()
+
+
+# def myprocess_twotime(args):
 
 
 ############ HELPERS FOR PUMP TABLE GENERATION ############

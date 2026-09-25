@@ -108,7 +108,7 @@ def build_input(args: argparse.Namespace, run_name: str) -> str:
 
     # If GS finite loop is even, add 2 more. If it is add just add 1 more.
     finite_loops = args.Pump_time_steps * (
-        args.TSPAdvanceEach // (args.sites - 2)
+        args.TSPAdvanceEach // (args.sites - 2) - 1
     )  # Total number of finite loops
 
     finite_rows = ",\n".join(
@@ -184,7 +184,7 @@ def build_input(args: argparse.Namespace, run_name: str) -> str:
                         "# --- Solver / run control ---",
                         'SolverOptions = "twositedmrg,usecomplex,restart,TimeStepTargeting,recoveryEnableRead";',
                         'Version = "stc_vs_ttc";',
-                        f'string RecoverySave = "%l%%1,@keep,@M={args.Pump_time_steps}";',
+                        f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
                         f'RestartFilename = "../{Path(args.restart_filename).resolve().name}";',
                         "GsWeight = 0.2;",

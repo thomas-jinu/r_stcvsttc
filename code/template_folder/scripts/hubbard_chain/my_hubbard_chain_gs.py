@@ -8,7 +8,7 @@ import argparse
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 # Resolve paths so that scripts live inside scripts/hubbard_chain, and the project root is two levels up.
@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Location of the current DMRG++ executables for different clusters. Adjust these paths as needed. The location is printed when the script is completed.
+DMRG_PRECISION = 12
 DMRG_EXECUTABLES = {
     "local": Path(
         "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
@@ -25,8 +26,7 @@ DMRG_EXECUTABLES = {
     "isaac": Path(
         "/nfs/home/jthom214/dmrgpp/programs_08192026/dmrgpp/installdir/bin/dmrg"
     ),
-    "nersc-cpu": Path("/global/common/software/m5228/dmrgpp_cpu/installdir/bin/dmrg"),
-    "nersc-gpu": Path("/global/common/software/m5228/dmrgpp/builddir-cuda/dmrg/dmrg"),
+    "nersc": Path("/global/common/software/m5228/dmrgpp_cpu/installdir/bin/dmrg"),
 }
 
 
@@ -181,15 +181,46 @@ def main() -> int:
 
     if args.run:
         subprocess.run(
-            ["./dmrg", "-f", str(input_path), "-p", "12"],
+            ["./dmrg", "-f", str(input_path), "-p", "{DMRG_PRECISION}"],
             cwd=run_folder,
             check=True,
         )
-    elif args.cluster != "local":
-        # args_slurm = parse_args_slurm()
+    elif args.cluster == "nersc":
         slurm_path = run_folder / f"batch_{run_name}.slurm"
-        # body = f"\n./dmrg -f input_{run_name}.ain\n"
-        # build_slurm_script(body, slurm_path, args.cluster, use_gpu=args.gpu)
+
+        body = f"""#!/bin/bash
+#SBATCH --account=m5228
+#SBATCH --qos=shared
+#SBATCH --constraint=cpu
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=32
+#SBATCH --time=01:00:00
+#SBATCH --job-name=dmrg_job
+#SBATCH --output=%x-%j.out
+#SBATCH --error=%x-%j.err
+
+set -euo pipefail
+
+module reset
+module load PrgEnv-gnu/8.7.0
+module load cray-mpich/9.1.0
+module load cray-libsci/26.03.0
+module load cray-hdf5/1.12.2.9
+
+export CC=cc
+export CXX=CC
+export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
+export BASE=/global/common/software/m5228
+export LOCAL="$BASE/local"
+
+cd "{run_folder}"
+
+date
+srun ./dmrg -f "{input_path.name}" -p "{DMRG_PRECISION}"
+date
+"""
+        slurm_path.write_text(body, encoding="utf-8")
         print(f"Wrote batch script: {slurm_path}")
     else:
         print("Input generated. Use --run to start DMRG++.")

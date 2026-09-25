@@ -2,7 +2,7 @@
 
 Run this script from above the directory containing the ``dmrgpp`` scripts,
 or adjust the project-root discovery below if your package layout differs.
-"""
+"""  # noqa: EXE002
 
 import argparse
 import csv
@@ -108,7 +108,7 @@ def build_input(args: argparse.Namespace, run_name: str) -> str:
 
     # If GS finite loop is even, add 2 more. If it is add just add 1 more.
     finite_loops = args.Pump_time_steps * (
-        args.TSPAdvanceEach // (args.sites - 2)
+        args.TSPAdvanceEach // (args.sites - 2) - 1
     )  # Total number of finite loops
 
     finite_rows = ",\n".join(
@@ -182,7 +182,7 @@ def build_input(args: argparse.Namespace, run_name: str) -> str:
                         "# --- Solver / run control ---",
                         'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression,recoveryEnableRead";',
                         'Version = "stc_vs_ttc";',
-                        f'string RecoverySave = "%l%%1,@keep,@M={args.Pump_time_steps}";',
+                        f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
                         f'RestartFilename = "../{Path(args.restart_filename).resolve().name}";',
                         "GsWeight = 0.2;",
