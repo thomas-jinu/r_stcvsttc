@@ -29,15 +29,38 @@ DMRG_EXECUTABLES = {
 }
 
 DMRG_PRECISION = 12
-OPERATOR_LABEL = "<P0|n|P0>,<gs|n|gs>,<P0|sz|P0>,<gs|sz|gs>,<P0|local_moment|P0>,<gs|local_moment|gs>,<P0|hole|P0>,<gs|hole|gs>,<P0|parity|P0>,<gs|parity|gs>,<P0|double|P0>,<gs|double|gs>,<P0|n*n|P0>,<gs|n*n|gs>"
+DEFINE_OPERATORS_DMRGPP = "double:nup*ndown,hole:identity+(-1.0)*nup+(-1.0)*ndown+nup*ndown,parity:identity+(-2.0)*n+4.0*nup*ndown,local_moment:0.75*n+(-1.5)*nup*ndown"
+OPERATOR_LABELS = {
+    "<P0|n|P0>",
+    "<gs|n|gs>",
+    "<P0|sz|P0>",
+    "<gs|sz|gs>",
+    "<P0|local_moment|P0>",
+    "<gs|local_moment|gs>",
+    "<P0|hole|P0>",
+    "<gs|hole|gs>",
+    "<P0|parity|P0>",
+    "<gs|parity|gs>",
+    "<P0|double|P0>",
+    "<gs|double|gs>",
+    "<P0|n*n|P0>",
+    "<gs|n*n|gs>",
+}
 COLLECTION_MARKER = "FiniteLoops printing ends"
 
 NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 OPERATOR_PATTERN = re.compile(
-    rf"^\s*(\d+)\s+"
-    rf"\(\s*({NUMBER_PATTERN})\s*,\s*({NUMBER_PATTERN})\s*\)\s+"
-    rf"({NUMBER_PATTERN})\s+"
-    rf"{re.escape(OPERATOR_LABEL)}"
+    r"""
+    ^\s*
+    (?P<site>\d+)\s+
+    \(
+        (?P<real>[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?),
+        (?P<imag>[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)
+    \)\s+
+    (?P<time>[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s+
+    (?P<label><[^>]+>)
+    """,
+    re.VERBOSE,
 )
 
 
@@ -70,32 +93,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("cluster", choices=DMRG_EXECUTABLES)
     mode = parser.add_mutually_exclusive_group()
     parser.add_argument(
-        "--parallel-steps",
-        type=int,
-        default=1,
-        help="Number of independent time steps to run simultaneously.",
-    )
-    parser.add_argument(
-        "--launcher",
-        choices=["local", "srun"],
-        default="local",
-        help="Run processes directly or launch them with srun.",
-    )
-    parser.add_argument(
         "--cpus-per-task",
         type=int,
         default=1,
-        help="CPU cores assigned to each DMRG++ process.",
+        help="CPU cores assigned for this run.",
     )
     mode.add_argument(
         "--run",
         action="store_true",
         help="Generate inputs, run DMRG++, and process the results.",
     )
+    parser.add_argument(
+        "--launcher",
+        choices=["local", "srun"],
+        default="local",
+        help="The launcher to use for running the simulation.",
+    )
     mode.add_argument(
         "--process",
-        metavar="RUN_NAME",
-        help="Only process an existing twotime_RUN_NAME directory.",
+        type=Path,
+        metavar="OUTPUT_FILE",
+        help="Process an existing output file.",
     )
 
     return parser.parse_args()
@@ -108,6 +126,8 @@ def build_input_td(
     pump_axis: list[float],
 ) -> str:
     """Build the time-dependent reference-state input."""
+
+    # Number of finite loops is determined by the number of pump time steps and the TSPAdvanceEach parameter.
     finite_loops = args.Pump_time_steps * (args.TSPAdvanceEach // (args.sites - 2)) - 1
 
     # Finite rows is the ordering of loops in DMRG++ input.
@@ -116,6 +136,7 @@ def build_input_td(
         f"    [@auto, {args.finite_kept}, 3]" for _ in range(finite_loops)
     )
 
+    # Build the AversusTime table for the pump values.
     aversus_t_table = "\n".join(
         f"    [{time:.15g}, {pump:.15g}]," for time, pump in zip(time_axis, pump_axis)
     ).rstrip(",")
@@ -152,7 +173,7 @@ def build_input_td(
                         "# --- Fock Space parameters ---",
                         f"TargetElectronsUp = {args.up};",
                         f"TargetElectronsDown = {args.down};",
-                        'DefineOperators="double:nup*ndown,hole:identity+(-1.0)*nup+(-1.0)*ndown+nup*ndown,parity:identity+(-2.0)*n+4.0*nup*ndown,local_moment:0.75*n+(-1.5)*nup*ndown";',
+                        f'DefineOperators="{DEFINE_OPERATORS_DMRGPP}";',
                     ]
                 ),
                 "\n".join(
@@ -221,139 +242,119 @@ def write_pump_table(
         writer.writerows((f"{time:.7f}", f"{pump:.7f}") for time, pump in pump_table)
 
 
-def find_td_output(td_folder: Path, run_name: str) -> Path:
-    """Find the DMRG++ evolve output file for one step."""
-    candidates = (td_folder / f"runForinput_{run_name}.cout",)
+def read_operator_output(
+    output_path: Path,
+) -> dict[str, list[tuple[int, complex, float]]]:
+    """Read operator values grouped by operator label."""
 
-    for path in candidates:
-        if path.exists():
-            return path
-
-    raise FileNotFoundError(f"No output found in {td_folder}")
-
-
-def read_operator_output(output_path: Path) -> np.ndarray:
-    """Read operator data after ``FiniteLoops printing ends``."""
-    rows_by_key = {}
-    collecting = False
+    operators = {label: [] for label in OPERATOR_LABELS}
 
     with output_path.open("r", encoding="utf-8") as file:
         for line in file:
-            if COLLECTION_MARKER in line:
-                collecting = True
-                continue
-            if not collecting or OPERATOR_LABEL not in line:
-                continue
+            match = OPERATOR_PATTERN.match(line)
 
-            match = OPERATOR_PATTERN.search(line)
             if match is None:
                 continue
 
-            site_index = int(match.group(1))
-            real_part = float(match.group(2))
-            imaginary_part = float(match.group(3))
-            time = float(match.group(4))
+            label = match.group("label")
 
-            # If the same site/time appears again, keep the last value.
-            rows_by_key[(site_index, time)] = [
-                site_index,
-                real_part,
-                imaginary_part,
-                time,
-            ]
+            if label not in operators:
+                continue
 
-    if not rows_by_key:
-        return np.empty((0, 4), dtype=float)
+            site = int(match.group("site"))
+            value = complex(
+                float(match.group("real")),
+                float(match.group("imag")),
+            )
+            time = float(match.group("time"))
 
-    return np.asarray(list(rows_by_key.values()), dtype=float)
+            operators[label].append((site, value, time))
+
+    return operators
 
 
 def collect_td_data(
-    td_folder: Path,
-    run_name: str,
-) -> dict[tuple[float, int], complex]:
+    output_path: Path,
+) -> dict[str, dict[tuple[float, int], complex]]:
     """
     Return:
         {
-            (t, site): complex_green_value
+            operator_label: {
+                (time, site): complex_value
+            }
         }
 
     Repeated keys retain the last value.
     """
-    data = {}
+    data = {label: {} for label in OPERATOR_LABELS}
 
-    output_path = find_td_output(td_folder, run_name)
     step_data = read_operator_output(output_path)
 
-    for site, real_part, imaginary_part, t in step_data:
-        key = (
-            float(t),
-            int(site),
-        )
-
-        data[key] = complex(
-            real_part,
-            imaginary_part,
-        )
+    for label, rows in step_data.items():
+        for site, value, time in rows:
+            key = (float(time), int(site))
+            data[label][key] = value
 
     return data
 
 
 def save_td_csv(
-    data: dict[tuple[float, int], complex],
+    data: dict[str, dict[tuple[float, int], complex]],
     output_path: Path,
 ) -> None:
-    """
-    Save two-time Green's-function data to CSV.
+    """Save all operator values in one wide CSV."""
 
-    Dictionary format:
-        {
-            (t, site): complex_value
-        }
-    """
+    labels = sorted(data)
+
+    all_keys = {key for operator_data in data.values() for key in operator_data}
+
     with output_path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
 
-        writer.writerow(
-            [
-                "t",
-                "site_index",
-                "real_part",
-                "imaginary_part",
-            ]
-        )
+        header = ["t", "site_index"]
 
-        for (t, site), value in sorted(data.items()):
-            writer.writerow(
+        for label in labels:
+            header.extend(
                 [
-                    f"{t:.15g}",
-                    f"{site}",
-                    f"{value.real:.15g}",
-                    f"{value.imag:.15g}",
+                    f"{label}_real",
+                    f"{label}_imag",
                 ]
             )
 
+        writer.writerow(header)
+
+        for time, site in sorted(all_keys):
+            row = [f"{time:.15g}", site]
+
+            for label in labels:
+                value = data[label].get((time, site), complex(float("nan")))
+
+                row.extend(
+                    [
+                        f"{value.real:.15g}",
+                        f"{value.imag:.15g}",
+                    ]
+                )
+
+            writer.writerow(row)
+
 
 def process_td_results(
-    base_directory: Path,
-    run_name: str,
+    output_path: Path,
     number_of_steps: int,
     time_axis,
 ) -> Path:
-    """Collect an existing run and write its combined CSV file."""
-    td_folder = base_directory / f"td_{run_name}"
+    """Process an existing DMRG++ output file."""
 
-    if not td_folder.is_dir():
-        raise FileNotFoundError(f"TD run folder not found: {td_folder}")
+    if not output_path.is_file():
+        raise FileNotFoundError(f"Output file not found: {output_path}")
+
     if number_of_steps > len(time_axis):
         raise ValueError("number_of_steps cannot exceed the length of time_axis")
 
-    data = collect_td_data(
-        td_folder=td_folder,
-        run_name=run_name,
-    )
+    data = collect_td_data(output_path)
 
-    csv_path = td_folder / f"{run_name}_{OPERATOR_LABEL}.csv"
+    csv_path = output_path.with_name(f"{output_path.stem}_operators.csv")
 
     save_td_csv(
         data=data,
@@ -428,6 +429,11 @@ def run_dmrg(
     )
 
 
+def frequency_tag(frequency: float) -> str:
+    """Convert a frequency into a filesystem-safe tag."""
+    return f"freq_{frequency:g}".replace(".", "p")
+
+
 def main() -> int:
     """Generate inputs, optionally run DMRG++, and collect the results."""
     args = parse_args()
@@ -451,8 +457,7 @@ def main() -> int:
             raise ValueError("Pump_time_steps must be positive")
 
         csv_path = process_td_results(
-            base_directory=restart_path.parent,
-            run_name=args.process,
+            output_path=args.process,
             number_of_steps=args.Pump_time_steps,
             time_axis=time_axis,
         )
@@ -475,7 +480,8 @@ def main() -> int:
     print(f"Wrote arguments: {args_path}")
 
     # Stage 1: create the time-dependent reference states.
-    run_folder_td = restart_path.parent / f"td_{run_name}"
+    frequency_tag_value = frequency_tag(args.Pump_Frequency)
+    run_folder_td = restart_path.parent / f"td_{run_name}_{frequency_tag_value}"
     run_folder_td.mkdir(parents=True, exist_ok=True)
     print(f"Created run folder: {run_folder_td}")
 
@@ -499,12 +505,11 @@ def main() -> int:
             input_path,
             launcher=args.launcher,
             cpus_per_task=args.cpus_per_task,
-            operator=OPERATOR_LABEL,
+            operator=",".join(sorted(OPERATOR_LABELS)),
         )
 
         csv_path = process_td_results(
-            base_directory=restart_path.parent,
-            run_name=run_name,
+            output_path=run_folder_td / f"runForinput_{run_name}.cout",
             number_of_steps=args.Pump_time_steps,
             time_axis=time_axis,
         )
@@ -521,9 +526,9 @@ def main() -> int:
 #SBATCH --ntasks={args.parallel_steps}
 #SBATCH --cpus-per-task={args.cpus_per_task}
 #SBATCH --time=03:00:00
-#SBATCH --job-name=dmrg_twotime
-#SBATCH --output=%x-%j.out
-#SBATCH --error=%x-%j.err
+#SBATCH --job-name=dmrg_td_freq_{frequency_tag}
+#SBATCH --output=dmrg_td_freq_{frequency_tag}-%j.out
+#SBATCH --error=dmrg_td_freq_{frequency_tag}-%j.err
 
 set -euo pipefail
 
@@ -541,7 +546,9 @@ export LOCAL="$BASE/local"
 
 date
 
-# Stage 1: generate the recovery states.
+echo "Running Pump_Frequency={args.Pump_Frequency}"
+echo "Working directory: {run_folder_td}"
+
 cd "{run_folder_td}"
 
 srun \\
@@ -551,7 +558,6 @@ srun \\
     ./dmrg \\
     -f "{input_path.name}" \\
     -p "{DMRG_PRECISION}"
-
 
 date
 """

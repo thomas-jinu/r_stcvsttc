@@ -58,51 +58,8 @@ def parse_args_input() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_args_slurm() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Parse arguments for the Slurm script.",
-    )
-    parser.add_argument("cluster", choices=["local", "isaac", "nersc"])
-    parser.add_argument("--gpu", action="store_true", help="Use GPU.")
-    return parser.parse_args()
-
-
-# def build_slurm_script(
-#     body: str, slurm_path: Path, cluster: str, use_gpu: bool = False
-# ) -> None:
-
-#     if cluster == "isaac":
-#         slurm_header = (
-#             "#!/bin/bash\n"
-#             "#SBATCH --job-name=dmrg_job\n"
-#             "#SBATCH --output=dmrg_output_%j.txt\n"
-#             "#SBATCH --error=dmrg_error_%j.txt\n"
-#             "#SBATCH --time=01:00:00\n"
-#             "#SBATCH --partition=compute\n"
-#             "#SBATCH --nodes=1\n"
-#             "#SBATCH --ntasks-per-node=1\n"
-#             "#SBATCH --natasks=12\n"
-#         )
-#     elif cluster == "nersc":
-#         slurm_header = (
-#             "#!/bin/bash\n"
-#             "#SBATCH --job-name=dmrg_job\n"
-#             "#SBATCH --output=dmrg_output_%j.txt\n"
-#             "#SBATCH --error=dmrg_error_%j.txt\n"
-#             "#SBATCH --time=01:00:00\n"
-#             "#SBATCH --partition=regular\n"
-#             "#SBATCH --nodes=1\n"
-#             "#SBATCH --ntasks-per-node=1\n"
-#             "#SBATCH --cpus-per-task=12\n"
-#         )
-#         if use_gpu:
-#             slurm_header += "#SBATCH --gres=gpu:1\n"
-#     else:
-#         raise ValueError(f"Unsupported cluster: {cluster}")
-
-
 def build_input(args: argparse.Namespace, up: int, down: int, run_name: str) -> str:
-
+    """Build the Ainur input file content based on the provided arguments."""
     finite_rows = ",\n".join(
         f"    [@auto, {args.finite_kept}, @save]" for _ in range(args.finite_loops)
     )
