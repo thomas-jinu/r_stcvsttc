@@ -130,6 +130,7 @@ def build_input(args: argparse.Namespace, up: int, down: int, run_name: str) -> 
                         "# --- Fock Space parameters ---",
                         f"TargetElectronsUp = {up};",
                         f"TargetElectronsDown = {down};",
+                        'DefineOperators="double:nup*ndown,hole:identity+(-1.0)*nup+(-1.0)*ndown+nup*ndown,parity:identity+(-2.0)*n+4.0*nup*ndown,local_moment:0.75*n+(-1.5)*nup*ndown";',
                     ]
                 ),
                 "\n".join(

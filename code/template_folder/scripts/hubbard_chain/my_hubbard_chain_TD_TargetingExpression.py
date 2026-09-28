@@ -7,20 +7,15 @@ or adjust the project-root discovery below if your package layout differs.
 import argparse
 import csv
 import math
-import os
+import re
 import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# Resolve paths so that scripts live inside scripts/hubbard_chain, and the project root is two levels up.
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[1]  # two level up to the project root
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+import numpy as np
 
-# Location of the current DMRG++ executables for different clusters. Adjust these paths as needed. The location is printed when the script is completed.
 DMRG_EXECUTABLES = {
     "local": Path(
         "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
@@ -28,9 +23,28 @@ DMRG_EXECUTABLES = {
     "isaac": Path(
         "/nfs/home/jthom214/dmrgpp/programs_08192026/dmrgpp/installdir/bin/dmrg"
     ),
-    "nersc-cpu": Path("/global/common/software/m5228/dmrgpp_cpu/installdir/bin/dmrg"),
-    "nersc-gpu": Path("/global/common/software/m5228/dmrgpp/builddir-cuda/dmrg/dmrg"),
+    "nersc": Path(
+        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
+    ),
 }
+
+DMRG_PRECISION = 12
+OPERATOR_LABEL = "<P2|c'|P3>"
+COLLECTION_MARKER = "FiniteLoops printing ends"
+
+NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+OPERATOR_PATTERN = re.compile(
+    rf"^\s*(\d+)\s+"
+    rf"\(\s*({NUMBER_PATTERN})\s*,\s*({NUMBER_PATTERN})\s*\)\s+"
+    rf"({NUMBER_PATTERN})\s+"
+    rf"{re.escape(OPERATOR_LABEL)}"
+)
+
+# Resolve paths so that scripts live inside scripts/hubbard_chain, and the project root is two levels up.
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parents[1]  # two level up to the project root
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def create_time_axis(nsteps, step_size):
@@ -107,9 +121,7 @@ def parse_args_input() -> argparse.Namespace:
 def build_input(args: argparse.Namespace, run_name: str) -> str:
 
     # If GS finite loop is even, add 2 more. If it is add just add 1 more.
-    finite_loops = args.Pump_time_steps * (
-        args.TSPAdvanceEach // (args.sites - 2) - 1
-    )  # Total number of finite loops
+    finite_loops = args.Pump_time_steps * (args.TSPAdvanceEach // (args.sites - 2)) - 1
 
     finite_rows = ",\n".join(
         f"    [@auto, {args.finite_kept}, 3]" for _ in range(finite_loops)

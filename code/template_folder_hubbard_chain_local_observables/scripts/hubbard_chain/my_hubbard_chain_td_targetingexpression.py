@@ -11,7 +11,6 @@ import re
 import shutil
 import subprocess
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,7 +29,7 @@ DMRG_EXECUTABLES = {
 }
 
 DMRG_PRECISION = 12
-OPERATOR_LABEL = "<P2|c'|P3>"
+OPERATOR_LABEL = "<P0|n|P0>,<gs|n|gs>,<P0|sz|P0>,<gs|sz|gs>,<P0|local_moment|P0>,<gs|local_moment|gs>,<P0|hole|P0>,<gs|hole|gs>,<P0|parity|P0>,<gs|parity|gs>,<P0|double|P0>,<gs|double|gs>,<P0|n*n|P0>,<gs|n*n|gs>"
 COLLECTION_MARKER = "FiniteLoops printing ends"
 
 NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
@@ -50,18 +49,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("sites", type=int, help="Chain length N")
     parser.add_argument("up", type=int, help="Number of spin-up electrons")
     parser.add_argument("down", type=int, help="Number of spin-down electrons")
-    parser.add_argument("center_site", type=int, help="Index of the center site")
     parser.add_argument("t", type=float, help="Hopping parameter t")
     parser.add_argument("U", type=float, help="Hubbard interaction U")
     parser.add_argument("potentialV", type=float, help="Potential V")
     parser.add_argument("gs_filename", type=Path, help="Ground-state file location")
     parser.add_argument(
         "finite_kept", type=int, help="Number of states in finite loops"
-    )
-    parser.add_argument(
-        "finite_loops_apply",
-        type=int,
-        help="Number of finite loops for applying the operator step",
     )
     parser.add_argument(
         "TSPAdvanceEach",
@@ -159,6 +152,7 @@ def build_input_td(
                         "# --- Fock Space parameters ---",
                         f"TargetElectronsUp = {args.up};",
                         f"TargetElectronsDown = {args.down};",
+                        'DefineOperators="double:nup*ndown,hole:identity+(-1.0)*nup+(-1.0)*ndown+nup*ndown,parity:identity+(-2.0)*n+4.0*nup*ndown,local_moment:0.75*n+(-1.5)*nup*ndown";',
                     ]
                 ),
                 "\n".join(
@@ -175,200 +169,11 @@ def build_input_td(
                 "\n".join(
                     [
                         "# --- Solver / run control ---",
-                        'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression";',
+                        'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression,minimizedisk";',
                         'Version = "stc_vs_ttc";',
-                        f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
+                        # f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
                         f'RestartFilename = "../{Path(args.gs_filename).resolve().name}";',
-                        "GsWeight = 0.1;",
-                    ]
-                ),
-            ]
-        )
-        + "\n"
-    )
-
-
-def build_input_apply(
-    args: argparse.Namespace,
-    run_name: str,
-    time_axis: list[float],
-    pump_axis: list[float],
-    step: int,
-    restart_filename_apply: str,
-) -> str:
-    """Build the input that applies the operator at one time step."""
-
-    # Finite rows for the apply step.
-    finite_rows = ",\n".join(
-        f"    [@auto, {args.finite_kept}, 2]" for _ in range(args.finite_loops_apply)
-    )
-
-    # Generate the pump table at the specific time step.
-    aversus_t_table = f"    [{time_axis[step]:.15g}, {pump_axis[step]:.15g}]"
-
-    return (
-        "\n\n".join(
-            [
-                "##Ainur1.0",
-                "\n".join(
-                    [
-                        "# --- Model parameters ---",
-                        f"TotalNumberOfSites = {args.sites};",
-                        "NumberOfTerms = 1;",
-                        "DegreesOfFreedom = 1;",
-                        'GeometryKind = "chain";',
-                        'GeometryOptions = "ConstantValues";',
-                        f"dir0:Connectors = [{args.t}];",
-                        f"hubbardU = [{args.U}, ...];",
-                        f"potentialV = [{args.potentialV}, ...];",
-                        'Model = "HubbardOneBand";',
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- Pump parameters --- #",
-                        "matrix AversusTime = [",
-                        f"{aversus_t_table}",
-                        "];",
-                        f"GeometryFactor = exp:*:1.0i:!readTableAversusTime,{time_axis[step]:.15g};",
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- Fock Space parameters ---",
-                        f"TargetElectronsUp = {args.up};",
-                        f"TargetElectronsDown = {args.down};",
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- DMRG++ control parameters ---",
-                        "TruncationTolerance = 1e-12;",
-                        "FiniteLoops = [",
-                        finite_rows,
-                        "];",
-                        "RestartMapStages=0;",
-                        "string P0 = |P0>;",
-                        f'string P1 = "c[{args.center_site}]*|P0>";',
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- Solver / run control ---",
-                        'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression";',
-                        'Version = "stc_vs_ttc_apply";',
-                        f'OutputFile = "{run_name}_apply";',
-                        f'RestartFilename = "{restart_filename_apply}";',
-                        "GsWeight = 0.1;",
-                    ]
-                ),
-            ]
-        )
-        + "\n"
-    )
-
-
-def build_input_evolve(
-    args: argparse.Namespace,
-    run_name: str,
-    time_axis: list[float],
-    pump_axis: list[float],
-    step: int,
-    restart_filename_evolve: str,
-) -> str:
-    """Build the time-evolution input after applying the operator."""
-    remaining_steps = len(time_axis) - step
-
-    if remaining_steps == 1:
-        finite_loops = args.TSPAdvanceEach // (args.sites - 2)
-
-        finite_rows = ",\n".join(
-            f"    [@auto, {args.finite_kept}, 2]" for _ in range(finite_loops)
-        )
-
-        aversus_t_table = f"    [{time_axis[step]:.15g}, {pump_axis[step]:.15g}]"
-
-        targeting_expression = [
-            "RestartMappingTvs=[0, 1, -1, -1];",
-            'string P0="|P0>";',
-            'string P1="|P1>";',
-            'string P2="|P0>";',
-            'string P3="|P1>";',
-        ]
-
-    else:
-        finite_loops = remaining_steps * (args.TSPAdvanceEach // (args.sites - 2)) - 1
-
-        finite_rows = ",\n".join(
-            f"    [@auto, {args.finite_kept}, 2]" for _ in range(finite_loops)
-        )
-
-        aversus_t_table = "\n".join(
-            f"    [{time:.15g}, {pump:.15g}],"
-            for time, pump in zip(time_axis[step:], pump_axis[step:])
-        ).rstrip(",")
-
-        targeting_expression = [
-            "RestartMappingTvs=[0, 1, -1, -1];",
-            'string P0="|P0>";',
-            'string P1="|P1>";',
-            f'string P2="TimeEvolve{{tau={args.TSPTau},steps=5,advanceEach={args.TSPAdvanceEach}}}*|P0>";',
-            f'string P3="TimeEvolve{{tau={args.TSPTau},steps=5,advanceEach={args.TSPAdvanceEach}}}*|P1>";',
-        ]
-
-    return (
-        "\n\n".join(
-            [
-                "##Ainur1.0",
-                "\n".join(
-                    [
-                        "# --- Model parameters ---",
-                        f"TotalNumberOfSites = {args.sites};",
-                        "NumberOfTerms = 1;",
-                        "DegreesOfFreedom = 1;",
-                        'GeometryKind = "chain";',
-                        'GeometryOptions = "ConstantValues";',
-                        f"dir0:Connectors = [{args.t}];",
-                        f"hubbardU = [{args.U}, ...];",
-                        f"potentialV = [{args.potentialV}, ...];",
-                        'Model = "HubbardOneBand";',
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- Pump parameters --- #",
-                        "matrix AversusTime = [",
-                        f"{aversus_t_table}",
-                        "];",
-                        "GeometryFactor = exp:*:1.0i:!readTableAversusTime,%t;",
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- Fock Space parameters ---",
-                        f"TargetElectronsUp = {args.up};",
-                        f"TargetElectronsDown = {args.down};",
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- DMRG++ control parameters ---",
-                        "TruncationTolerance = 1e-12;",
-                        "FiniteLoops = [",
-                        finite_rows,
-                        "];",
-                        "RestartMapStages=0;",
-                        *targeting_expression,
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- Solver / run control ---",
-                        'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression,minimizedisk";',
-                        'Version = "stc_vs_ttc_apply_evolve";',
-                        f'OutputFile = "{run_name}_evolve";',
-                        f'RestartFilename = "{restart_filename_evolve}";',
                         "GsWeight = 0.1;",
                     ]
                 ),
@@ -416,15 +221,15 @@ def write_pump_table(
         writer.writerows((f"{time:.7f}", f"{pump:.7f}") for time, pump in pump_table)
 
 
-def find_evolve_output(step_folder: Path, run_name: str) -> Path:
+def find_td_output(td_folder: Path, run_name: str) -> Path:
     """Find the DMRG++ evolve output file for one step."""
-    candidates = (step_folder / f"runForinput_{run_name}_evolve.cout",)
+    candidates = (td_folder / f"runForinput_{run_name}.cout",)
 
     for path in candidates:
         if path.exists():
             return path
 
-    raise FileNotFoundError(f"No evolve output found in {step_folder}")
+    raise FileNotFoundError(f"No output found in {td_folder}")
 
 
 def read_operator_output(output_path: Path) -> np.ndarray:
@@ -463,48 +268,39 @@ def read_operator_output(output_path: Path) -> np.ndarray:
     return np.asarray(list(rows_by_key.values()), dtype=float)
 
 
-def collect_twotime_data(
-    twotime_folder: Path,
+def collect_td_data(
+    td_folder: Path,
     run_name: str,
-    number_of_steps: int,
-    time_axis: list[float],
-    center_site: int,
-) -> dict[tuple[float, float, int, int], complex]:
+) -> dict[tuple[float, int], complex]:
     """
     Return:
         {
-            (t_prime, t, center_site, site): complex_green_value
+            (t, site): complex_green_value
         }
 
     Repeated keys retain the last value.
     """
     data = {}
 
-    for step in range(number_of_steps):
-        step_folder = twotime_folder / f"step_{step:04d}"
-        output_path = find_evolve_output(step_folder, run_name)
-        step_data = read_operator_output(output_path)
+    output_path = find_td_output(td_folder, run_name)
+    step_data = read_operator_output(output_path)
 
-        t_prime = float(time_axis[step])
+    for site, real_part, imaginary_part, t in step_data:
+        key = (
+            float(t),
+            int(site),
+        )
 
-        for site, real_part, imaginary_part, t in step_data:
-            key = (
-                t_prime,
-                float(t),
-                int(center_site),
-                int(site),
-            )
-
-            data[key] = complex(
-                real_part,
-                imaginary_part,
-            )
+        data[key] = complex(
+            real_part,
+            imaginary_part,
+        )
 
     return data
 
 
-def save_twotime_csv(
-    data: dict[tuple[float, float, int, int], complex],
+def save_td_csv(
+    data: dict[tuple[float, int], complex],
     output_path: Path,
 ) -> None:
     """
@@ -512,7 +308,7 @@ def save_twotime_csv(
 
     Dictionary format:
         {
-            (t_prime, t, center_site, site): complex_value
+            (t, site): complex_value
         }
     """
     with output_path.open("w", newline="", encoding="utf-8") as file:
@@ -520,54 +316,46 @@ def save_twotime_csv(
 
         writer.writerow(
             [
-                "t_prime",
                 "t",
-                "center_site",
                 "site_index",
                 "real_part",
                 "imaginary_part",
             ]
         )
 
-        for (t, tprime, center_site, site), value in sorted(data.items()):
+        for (t, site), value in sorted(data.items()):
             writer.writerow(
                 [
                     f"{t:.15g}",
-                    f"{tprime:.15g}",
-                    center_site,
-                    site,
+                    f"{site}",
                     f"{value.real:.15g}",
                     f"{value.imag:.15g}",
                 ]
             )
 
 
-def process_twotime_results(
+def process_td_results(
     base_directory: Path,
     run_name: str,
     number_of_steps: int,
     time_axis,
-    center_site: int,
 ) -> Path:
     """Collect an existing run and write its combined CSV file."""
-    twotime_folder = base_directory / f"twotime_{run_name}"
+    td_folder = base_directory / f"td_{run_name}"
 
-    if not twotime_folder.is_dir():
-        raise FileNotFoundError(f"Two-time run folder not found: {twotime_folder}")
+    if not td_folder.is_dir():
+        raise FileNotFoundError(f"TD run folder not found: {td_folder}")
     if number_of_steps > len(time_axis):
         raise ValueError("number_of_steps cannot exceed the length of time_axis")
 
-    data = collect_twotime_data(
-        twotime_folder=twotime_folder,
+    data = collect_td_data(
+        td_folder=td_folder,
         run_name=run_name,
-        number_of_steps=number_of_steps,
-        time_axis=time_axis,
-        center_site=center_site,
     )
 
-    csv_path = twotime_folder / f"{run_name}_P2_c_P3_centersite={center_site}.csv"
+    csv_path = td_folder / f"{run_name}_{OPERATOR_LABEL}.csv"
 
-    save_twotime_csv(
+    save_td_csv(
         data=data,
         output_path=csv_path,
     )
@@ -640,29 +428,6 @@ def run_dmrg(
     )
 
 
-def run_one_step(
-    step_folder: Path,
-    input_path_apply: Path,
-    input_path_evolve: Path,
-    launcher: str,
-    cpus_per_task: int,
-) -> None:
-    """Run the apply and evolve calculations for one time step."""
-    run_dmrg(
-        step_folder,
-        input_path_apply,
-        launcher=launcher,
-        cpus_per_task=cpus_per_task,
-    )
-    run_dmrg(
-        step_folder,
-        input_path_evolve,
-        operator=OPERATOR_LABEL,
-        launcher=launcher,
-        cpus_per_task=cpus_per_task,
-    )
-
-
 def main() -> int:
     """Generate inputs, optionally run DMRG++, and collect the results."""
     args = parse_args()
@@ -684,12 +449,12 @@ def main() -> int:
     if args.process:
         if args.Pump_time_steps <= 0:
             raise ValueError("Pump_time_steps must be positive")
-        csv_path = process_twotime_results(
+
+        csv_path = process_td_results(
             base_directory=restart_path.parent,
             run_name=args.process,
             number_of_steps=args.Pump_time_steps,
             time_axis=time_axis,
-            center_site=args.center_site,
         )
         print(f"Wrote post-processed data: {csv_path}")
         return 0
@@ -734,83 +499,21 @@ def main() -> int:
             input_path,
             launcher=args.launcher,
             cpus_per_task=args.cpus_per_task,
+            operator=OPERATOR_LABEL,
         )
 
-    # Stage 2: create and optionally run each two-time calculation.
-    run_folder_twotime = restart_path.parent / f"twotime_{run_name}"
-    run_folder_twotime.mkdir(parents=True, exist_ok=True)
-    print(f"Created run folder: {run_folder_twotime}")
-
-    step_jobs = []
-
-    for step in range(args.Pump_time_steps):
-        step_folder = run_folder_twotime / f"step_{step:04d}"
-        step_folder.mkdir(parents=True, exist_ok=True)
-        print(f"Created step folder: {step_folder}")
-        shutil.copy2(executable_path, step_folder / "dmrg")
-
-        restart_filename = f"../../td_{run_name}/Recovery{step}{run_name}"
-
-        input_path_apply = step_folder / f"input_{run_name}_apply.ain"
-        input_path_apply.write_text(
-            build_input_apply(
-                args,
-                run_name,
-                step=step,
-                time_axis=time_axis,
-                pump_axis=pump_axis,
-                restart_filename_apply=restart_filename,
-            ),
-            encoding="utf-8",
-        )
-
-        input_path_evolve = step_folder / f"input_{run_name}_evolve.ain"
-        input_path_evolve.write_text(
-            build_input_evolve(
-                args,
-                run_name,
-                step=step,
-                time_axis=time_axis,
-                pump_axis=pump_axis,
-                restart_filename_evolve=run_name + "_apply",
-            ),
-            encoding="utf-8",
-        )
-
-        print(f"Wrote Ainur input: {input_path_apply}")
-        print(f"Wrote Ainur input: {input_path_evolve}")
-
-        step_jobs.append((step_folder, input_path_apply, input_path_evolve))
-
-    if args.run:
-        with ThreadPoolExecutor(max_workers=args.parallel_steps) as executor:
-            futures = [
-                executor.submit(
-                    run_one_step,
-                    step_folder,
-                    input_path_apply,
-                    input_path_evolve,
-                    args.launcher,
-                    args.cpus_per_task,
-                )
-                for step_folder, input_path_apply, input_path_evolve in step_jobs
-            ]
-
-            for future in as_completed(futures):
-                future.result()
-
-        csv_path = process_twotime_results(
+        csv_path = process_td_results(
             base_directory=restart_path.parent,
             run_name=run_name,
-            center_site=args.center_site,
             number_of_steps=args.Pump_time_steps,
             time_axis=time_axis,
         )
         print(f"Wrote post-processed data: {csv_path}")
-    elif args.cluster == "nersc":
-        slurm_path = run_folder_twotime / f"batch_{run_name}.slurm"
 
-        body = body = f"""#!/bin/bash
+    elif args.cluster == "nersc":
+        slurm_path = run_folder_td / f"batch_{run_name}.slurm"
+
+        body = f"""#!/bin/bash
 #SBATCH --account=m5228
 #SBATCH --qos=shared
 #SBATCH --constraint=cpu
@@ -849,47 +552,6 @@ srun \\
     -f "{input_path.name}" \\
     -p "{DMRG_PRECISION}"
 
-# Stage 2: run separate time steps concurrently.
-pids=()
-
-for step_folder in "{run_folder_twotime}"/step_*; do
-    (
-        cd "$step_folder"
-
-        srun \\
-            --exclusive \\
-            --ntasks=1 \\
-            --cpus-per-task={args.cpus_per_task} \\
-            ./dmrg \\
-            -f "input_{run_name}_apply.ain" \\
-            -p "{DMRG_PRECISION}"
-
-        srun \\
-            --exclusive \\
-            --ntasks=1 \\
-            --cpus-per-task={args.cpus_per_task} \\
-            ./dmrg \\
-            -f "input_{run_name}_evolve.ain" \\
-            -p "{DMRG_PRECISION}" \\
-            "{OPERATOR_LABEL}"
-    ) &
-
-    pids+=("$!")
-done
-
-# Wait for every background step and detect failures.
-failed=0
-
-for pid in "${{pids[@]}}"; do
-    if ! wait "$pid"; then
-        failed=1
-    fi
-done
-
-if (( failed != 0 )); then
-    echo "One or more two-time steps failed." >&2
-    exit 1
-fi
 
 date
 """
@@ -897,7 +559,6 @@ date
         print(f"Wrote batch script: {slurm_path}")
     else:
         print("Inputs generated. Use --run to execute DMRG++.")
-
     return 0
 
 
