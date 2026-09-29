@@ -471,103 +471,187 @@ def main() -> int:
     if not executable_path.is_file():
         raise FileNotFoundError(f"DMRG++ executable not found: {executable_path}")
 
-    args_path = restart_path.parent / f"input_args_twotime_{run_name}.json"
-    save_arguments(args, args_path)
-    print(f"Wrote arguments: {args_path}")
-
-    # Stage 1: create the time-dependent reference states.
-    frequency_tag_value = frequency_tag(args.Pump_Frequency)
-    run_folder_td = restart_path.parent / f"td_{run_name}_{frequency_tag_value}"
-    run_folder_td.mkdir(parents=True, exist_ok=True)
-    print(f"Created run folder: {run_folder_td}")
-
-    print(f"Using DMRG++ executable for cluster '{args.cluster}': {executable_path}")
-    shutil.copy2(executable_path, run_folder_td / "dmrg")
-
-    write_pump_table(
-        pump_table=zip(time_axis, pump_axis),
-        output_path=run_folder_td / "pump_table.csv",
-    )
-
-    input_path = run_folder_td / f"input_{run_name}.ain"
-    input_path.write_text(
-        build_input_td(args, run_name, time_axis, pump_axis), encoding="utf-8"
-    )
-    print(f"Wrote Ainur input: {input_path}")
-
     if args.run:
-        run_dmrg(
-            run_folder_td,
-            input_path,
-            launcher=args.launcher,
-            cpus_per_task=args.cpus_per_task,
-            operator=",".join(sorted(OPERATOR_LABELS)),
-        )
+        if args.cluster == "local":
+            # Stage 1: create the time-dependent reference states.
+            frequency_tag_value = frequency_tag(args.Pump_Frequency)
+            run_folder_td = restart_path.parent / f"td_{run_name}_{frequency_tag_value}"
+            run_folder_td.mkdir(parents=True, exist_ok=True)
+            print(f"Created run folder: {run_folder_td}")
 
-        csv_path = process_td_results(
-            output_path=run_folder_td / f"runForinput_{run_name}.cout",
-            number_of_steps=args.Pump_time_steps,
-            time_axis=time_axis,
-        )
-        print(f"Wrote post-processed data: {csv_path}")
+            # Save the command-line arguments to a JSON file.
+            args_path = restart_path.parent / f"input_args_twotime_{run_name}.json"
+            save_arguments(args, args_path)
+            print(f"Wrote arguments: {args_path}")
 
-    elif args.cluster == "nersc":
-        slurm_path = run_folder_td / f"batch_{run_name}.slurm"
+            # Copy the DMRG++ executable to the run folder.
+            print(
+                f"Using DMRG++ executable for cluster '{args.cluster}': {executable_path}"
+            )
+            shutil.copy2(executable_path, run_folder_td / "dmrg")
 
-        body = f"""#!/bin/bash
-#SBATCH --account=m5228
-#SBATCH --qos=regular
-#SBATCH --constraint=cpu
-#SBATCH --nodes=2
-#SBATCH --ntasks=8
-#SBATCH --cpus-per-task=16
-#SBATCH --time=48:00:00
-#SBATCH --job-name=dmrg_frequency
-#SBATCH --output=%x-%j.out
-#SBATCH --error=%x-%j.err
+            # Write the pump table to a CSV file for reference.
+            write_pump_table(
+                pump_table=zip(time_axis, pump_axis),
+                output_path=run_folder_td / "pump_table.csv",
+            )
 
-set -euo pipefail
+            input_path = run_folder_td / f"input_{run_name}.ain"
+            input_path.write_text(
+                build_input_td(args, run_name, time_axis, pump_axis), encoding="utf-8"
+            )
+            print(f"Wrote Ainur input: {input_path}")
 
-module reset
-module load PrgEnv-gnu/8.7.0
-module load cray-mpich/9.1.0
-module load cray-libsci/26.03.0
-module load cray-hdf5/1.14.3.7
+            # Run DMRG++ with the generated input and collect the results.
+            run_dmrg(
+                run_folder_td,
+                input_path,
+                launcher=args.launcher,
+                cpus_per_task=args.cpus_per_task,
+                operator=",".join(sorted(OPERATOR_LABELS)),
+            )
 
-conda activate dmrg
+            # Process the results and write them to a CSV file.
+            csv_path = process_td_results(
+                output_path=run_folder_td / f"runForinput_{run_name}.cout",
+                number_of_steps=args.Pump_time_steps,
+                time_axis=time_axis,
+            )
+            print(f"Wrote post-processed data: {csv_path}")
 
-export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
+        elif args.cluster == "nersc":
+            # Stage 1: create all frequency folders and inputs.
+            run_folder_td = restart_path.parent / f"td_{run_name}"
+            run_folder_td.mkdir(parents=True, exist_ok=True)
+            print(f"Created run folder: {run_folder_td}")
 
-SCRIPT="{Path(__file__).resolve()}"
-GS_FILE="{restart_path}"
+            args_path = restart_path.parent / f"input_args_twotime_{run_name}.json"
+            save_arguments(args, args_path)
+            print(f"Wrote arguments: {args_path}")
 
-for frequency in $(seq {args.frequency_start} {args.frequency_step} {args.frequency_stop}); do
-    frequency_tag="${{frequency//./p}}"
+            print(
+                f"Using DMRG++ executable for cluster "
+                f"'{args.cluster}': {executable_path}"
+            )
 
-    srun \\
-        --exclusive \\
-        --ntasks=1 \\
-        --cpus-per-task="${{SLURM_CPUS_PER_TASK}}" \\
-        --output="frequency_${{frequency_tag}}.out" \\
-        --error="frequency_${{frequency_tag}}.err" \\
-        python "$SCRIPT" \\
-            {args.sites} {args.up} {args.down} {args.t} {args.U} {args.potentialV} \\
-            "$GS_FILE" \\
-            {args.finite_kept} {args.TSPAdvanceEach} {args.TSPTau} {args.Pump_Amplitude} \\
-            "$frequency" \\
-            {args.Pump_time_delay} {args.Pump_pulse_width} {args.Pump_time_steps} \\
-            {args.cluster} \\
-            --launcher local \\
-            --cpus-per-task="${{SLURM_CPUS_PER_TASK}}" \\
-            --run &
-done
+            frequency_entries = []
 
-wait
+            frequencies = np.arange(
+                args.frequency_start,
+                args.frequency_stop + args.frequency_step / 2,
+                args.frequency_step,
+            )
 
-echo "All frequency jobs completed."
-"""
-        slurm_path.write_text(body, encoding="utf-8")
-        print(f"Wrote batch script: {slurm_path}")
+            for frequency_value in frequencies:
+                frequency = float(round(frequency_value, 9))
+                frequency_tag_value = frequency_tag(frequency)
+                frequency_folder = run_folder_td / frequency_tag_value
+                frequency_folder.mkdir(parents=True, exist_ok=True)
+
+                frequency_args = argparse.Namespace(**vars(args))
+                frequency_args.Pump_Frequency = frequency
+
+                frequency_run_name = f"{run_name}_{frequency_tag_value}"
+                frequency_time_axis = create_time_axis(
+                    nsteps=args.Pump_time_steps,
+                    step_size=args.TSPTau,
+                )
+                frequency_pump_axis = create_pump_axis(
+                    frequency_time_axis,
+                    amplitude=args.Pump_Amplitude,
+                    omega_pump=frequency,
+                    t_delay=args.Pump_time_delay,
+                    sigma=args.Pump_pulse_width,
+                )
+
+                shutil.copy2(executable_path, frequency_folder / "dmrg")
+
+                write_pump_table(
+                    pump_table=zip(
+                        frequency_time_axis,
+                        frequency_pump_axis,
+                    ),
+                    output_path=frequency_folder / "pump_table.csv",
+                )
+
+                input_path = frequency_folder / f"input_{frequency_run_name}.ain"
+                input_path.write_text(
+                    build_input_td(
+                        frequency_args,
+                        frequency_run_name,
+                        frequency_time_axis,
+                        frequency_pump_axis,
+                        restart_filename=f"../../{restart_path.name}",
+                    ),
+                    encoding="utf-8",
+                )
+
+                print(f"Wrote Ainur input: {input_path}")
+
+                frequency_entries.append(
+                    {
+                        "frequency": frequency,
+                        "tag": frequency_tag_value,
+                        "folder": frequency_folder,
+                        "input": input_path,
+                    }
+                )
+
+            slurm_path = run_folder_td / f"batch_{run_name}.slurm"
+
+            srun_commands = []
+            operator_argument = ",".join(sorted(OPERATOR_LABELS))
+
+            for entry in frequency_entries:
+                srun_commands.append(
+                    f'''srun \\
+    --exclusive \\
+    --ntasks=1 \\
+    --cpus-per-task="${{SLURM_CPUS_PER_TASK}}" \\
+    --output="{entry["tag"]}.out" \\
+    --error="{entry["tag"]}.err" \\
+    bash -c 'cd "{entry["folder"]}" && ./dmrg \\
+        -f "{entry["input"].name}" \\
+        -p "{DMRG_PRECISION}" \\
+        "{operator_argument}"' &'''
+                )
+
+            body = f"""#!/bin/bash
+    #SBATCH --account=m5228
+    #SBATCH --qos=regular
+    #SBATCH --constraint=cpu
+    #SBATCH --nodes=2
+    #SBATCH --ntasks=8
+    #SBATCH --cpus-per-task=16
+    #SBATCH --time=48:00:00
+    #SBATCH --job-name=dmrg_frequency
+    #SBATCH --output=%x-%j.out
+    #SBATCH --error=%x-%j.err
+
+    set -euo pipefail
+
+    module reset
+    module load PrgEnv-gnu/8.7.0
+    module load cray-mpich/9.1.0
+    module load cray-libsci/26.03.0
+    module load cray-hdf5/1.14.3.7
+
+    conda activate dmrg
+
+    export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
+
+    {"\n".join(srun_commands)}
+
+    wait
+
+    echo "All frequency jobs completed."
+    """
+
+            slurm_path.write_text(body, encoding="utf-8")
+            print(f"Wrote batch script: {slurm_path}")
+
+        else:
+            raise ValueError(f"Unsupported cluster: {args.cluster}")
     else:
         print("Inputs generated. Use --run to execute DMRG++.")
     return 0
