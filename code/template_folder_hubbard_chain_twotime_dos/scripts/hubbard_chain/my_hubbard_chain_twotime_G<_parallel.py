@@ -617,7 +617,6 @@ def run_dmrg(
             "--exclusive",
             "--ntasks=1",
             f"--cpus-per-task={cpus_per_task}",
-            "--wait",
             *dmrg_command,
         ]
     else:
