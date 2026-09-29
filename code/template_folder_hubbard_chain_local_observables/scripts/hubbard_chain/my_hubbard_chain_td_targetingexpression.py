@@ -526,7 +526,8 @@ def main() -> int:
             run_folder_td.mkdir(parents=True, exist_ok=True)
             print(f"Created run folder: {run_folder_td}")
 
-            args_path = restart_path.parent / f"input_args_twotime_{run_name}.json"
+            # Save the command-line arguments to a JSON file.
+            args_path = run_folder_td.parent / f"input_args_td_{run_name}.json"
             save_arguments(args, args_path)
             print(f"Wrote arguments: {args_path}")
 
