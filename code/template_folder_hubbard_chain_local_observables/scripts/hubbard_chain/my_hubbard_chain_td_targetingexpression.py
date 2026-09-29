@@ -623,7 +623,6 @@ module load cray-mpich/9.1.0
 module load cray-libsci/26.03.0
 module load cray-hdf5/1.14.3.7
 
-conda activate dmrg
 
 export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
 

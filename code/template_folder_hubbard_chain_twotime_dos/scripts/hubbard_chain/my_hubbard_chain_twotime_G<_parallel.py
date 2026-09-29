@@ -830,7 +830,6 @@ export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
 export BASE=/global/common/software/m5228
 export LOCAL="$BASE/local"
 
-conda activate dmrg
 
 date
 
