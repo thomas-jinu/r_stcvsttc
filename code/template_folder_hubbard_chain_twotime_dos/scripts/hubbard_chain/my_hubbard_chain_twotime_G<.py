@@ -16,14 +16,8 @@ from pathlib import Path
 import numpy as np
 
 DMRG_EXECUTABLES = {
-    "local": Path(
-        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
-    ),
-    "isaac": Path(
-        "/nfs/home/jthom214/dmrgpp/programs_08192026/dmrgpp/installdir/bin/dmrg"
-    ),
-    "nersc-cpu": Path("/global/common/software/m5228/dmrgpp_cpu/installdir/bin/dmrg"),
-    "nersc-gpu": Path("/global/common/software/m5228/dmrgpp/builddir-cuda/dmrg/dmrg"),
+    "local": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
 }
 
 DMRG_PRECISION = 12
