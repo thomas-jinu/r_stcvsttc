@@ -120,6 +120,7 @@ def build_input_td(
     run_name: str,
     time_axis: list[float],
     pump_axis: list[float],
+    restart_filename: str | None = "../{Path(args.gs_filename).resolve().name}",
 ) -> str:
     """Build the time-dependent reference-state input."""
 
@@ -190,7 +191,7 @@ def build_input_td(
                         'Version = "stc_vs_ttc";',
                         # f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
-                        f'RestartFilename = "../{Path(args.gs_filename).resolve().name}";',
+                        f'RestartFilename = "{args.restart_filename}";',
                         "GsWeight = 0.1;",
                     ]
                 ),
