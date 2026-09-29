@@ -20,13 +20,8 @@ if str(PROJECT_ROOT) not in sys.path:
 # Location of the current DMRG++ executables for different clusters. Adjust these paths as needed. The location is printed when the script is completed.
 DMRG_PRECISION = 12
 DMRG_EXECUTABLES = {
-    "local": Path(
-        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
-    ),
-    "isaac": Path(
-        "/nfs/home/jthom214/dmrgpp/programs_08192026/dmrgpp/installdir/bin/dmrg"
-    ),
-    "nersc": Path("/global/common/software/m5228/dmrgpp_cpu/installdir/bin/dmrg"),
+    "local": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
 }
 
 
@@ -164,7 +159,7 @@ module reset
 module load PrgEnv-gnu/8.7.0
 module load cray-mpich/9.1.0
 module load cray-libsci/26.03.0
-module load cray-hdf5/1.12.2.9
+module load cray-hdf5/1.14.3.7
 
 export CC=cc
 export CXX=CC

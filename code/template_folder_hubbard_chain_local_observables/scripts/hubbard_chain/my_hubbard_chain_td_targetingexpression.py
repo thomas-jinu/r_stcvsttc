@@ -17,15 +17,8 @@ from pathlib import Path
 import numpy as np
 
 DMRG_EXECUTABLES = {
-    "local": Path(
-        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
-    ),
-    "isaac": Path(
-        "/nfs/home/jthom214/dmrgpp/programs_08192026/dmrgpp/installdir/bin/dmrg"
-    ),
-    "nersc": Path(
-        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
-    ),
+    "local": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
 }
 
 DMRG_PRECISION = 12
@@ -91,6 +84,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("Pump_pulse_width", type=float)
     parser.add_argument("Pump_time_steps", type=int)
     parser.add_argument("cluster", choices=DMRG_EXECUTABLES)
+    parser.add_argument("--frequency-start", type=float, default=0.0)
+    parser.add_argument("--frequency-stop", type=float, default=10.0)
+    parser.add_argument("--frequency-step", type=float, default=0.25)
     mode = parser.add_mutually_exclusive_group()
     parser.add_argument(
         "--cpus-per-task",
@@ -520,15 +516,15 @@ def main() -> int:
 
         body = f"""#!/bin/bash
 #SBATCH --account=m5228
-#SBATCH --qos=shared
+#SBATCH --qos=regular
 #SBATCH --constraint=cpu
-#SBATCH --nodes=1
-#SBATCH --ntasks={args.parallel_steps}
-#SBATCH --cpus-per-task={args.cpus_per_task}
-#SBATCH --time=03:00:00
-#SBATCH --job-name=dmrg_td_freq_{frequency_tag}
-#SBATCH --output=dmrg_td_freq_{frequency_tag}-%j.out
-#SBATCH --error=dmrg_td_freq_{frequency_tag}-%j.err
+#SBATCH --nodes=2
+#SBATCH --ntasks=8
+#SBATCH --cpus-per-task=16
+#SBATCH --time=48:00:00
+#SBATCH --job-name=dmrg_frequency
+#SBATCH --output=%x-%j.out
+#SBATCH --error=%x-%j.err
 
 set -euo pipefail
 
@@ -538,28 +534,35 @@ module load cray-mpich/9.1.0
 module load cray-libsci/26.03.0
 module load cray-hdf5/1.14.3.7
 
-export CC=cc
-export CXX=CC
 export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
-export BASE=/global/common/software/m5228
-export LOCAL="$BASE/local"
 
-date
+SCRIPT="{Path(__file__).resolve()}"
+GS_FILE="{restart_path}"
 
-echo "Running Pump_Frequency={args.Pump_Frequency}"
-echo "Working directory: {run_folder_td}"
+for frequency in $(seq {args.frequency_start} {args.frequency_step} {args.frequency_stop}); do
+    frequency_tag="${{frequency//./p}}"
 
-cd "{run_folder_td}"
+    srun \\
+        --exclusive \\
+        --ntasks=1 \\
+        --cpus-per-task="${{SLURM_CPUS_PER_TASK}}" \\
+        --output="frequency_${{frequency_tag}}.out" \\
+        --error="frequency_${{frequency_tag}}.err" \\
+        python "$SCRIPT" \\
+            {args.sites} {args.up} {args.down} {args.t} {args.U} {args.potentialV} \\
+            "$GS_FILE" \\
+            {args.finite_kept} {args.TSPAdvanceEach} {args.TSPTau} {args.Pump_Amplitude} \\
+            "$frequency" \\
+            {args.Pump_time_delay} {args.Pump_pulse_width} {args.Pump_time_steps} \\
+            {args.cluster} \\
+            --launcher local \\
+            --cpus-per-task="${{SLURM_CPUS_PER_TASK}}" \\
+            --run &
+done
 
-srun \\
-    --exclusive \\
-    --ntasks=1 \\
-    --cpus-per-task={args.cpus_per_task} \\
-    ./dmrg \\
-    -f "{input_path.name}" \\
-    -p "{DMRG_PRECISION}"
+wait
 
-date
+echo "All frequency jobs completed."
 """
         slurm_path.write_text(body, encoding="utf-8")
         print(f"Wrote batch script: {slurm_path}")
