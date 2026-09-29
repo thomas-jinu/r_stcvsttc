@@ -636,7 +636,6 @@ for frequency_folder in "$TD_FOLDER"/freq_*; do
     srun \\
         --exclusive \\
         --ntasks=1 \\
-        --cpus-per-task="${{SLURM_CPUS_PER_TASK}}" \\
         --output="${{frequency_tag}}.out" \\
         --error="${{frequency_tag}}.err" \\
         bash -c 'cd "$1" && ./dmrg \\
