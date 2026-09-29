@@ -601,53 +601,55 @@ def main() -> int:
 
             slurm_path = run_folder_td / f"batch_{run_name}.slurm"
 
-            srun_commands = []
             operator_argument = ",".join(sorted(OPERATOR_LABELS))
 
-            for entry in frequency_entries:
-                srun_commands.append(
-                    f'''srun \\
-    --exclusive \\
-    --ntasks=1 \\
-    --cpus-per-task="${{SLURM_CPUS_PER_TASK}}" \\
-    --output="{entry["tag"]}.out" \\
-    --error="{entry["tag"]}.err" \\
-    bash -c 'cd "{entry["folder"]}" && ./dmrg \\
-        -f "{entry["input"].name}" \\
-        -p "{DMRG_PRECISION}" \\
-        "{operator_argument}"' &'''
-                )
-
             body = f"""#!/bin/bash
-    #SBATCH --account=m5228
-    #SBATCH --qos=regular
-    #SBATCH --constraint=cpu
-    #SBATCH --nodes=2
-    #SBATCH --ntasks=8
-    #SBATCH --cpus-per-task=16
-    #SBATCH --time=48:00:00
-    #SBATCH --job-name=dmrg_frequency
-    #SBATCH --output=%x-%j.out
-    #SBATCH --error=%x-%j.err
+#SBATCH --account=m5228
+#SBATCH --qos=regular
+#SBATCH --constraint=cpu
+#SBATCH --nodes=2
+#SBATCH --ntasks=8
+#SBATCH --cpus-per-task=16
+#SBATCH --time=48:00:00
+#SBATCH --job-name=dmrg_frequency
+#SBATCH --output=%x-%j.out
+#SBATCH --error=%x-%j.err
 
-    set -euo pipefail
+set -euo pipefail
 
-    module reset
-    module load PrgEnv-gnu/8.7.0
-    module load cray-mpich/9.1.0
-    module load cray-libsci/26.03.0
-    module load cray-hdf5/1.14.3.7
+module reset
+module load PrgEnv-gnu/8.7.0
+module load cray-mpich/9.1.0
+module load cray-libsci/26.03.0
+module load cray-hdf5/1.14.3.7
 
-    conda activate dmrg
+conda activate dmrg
 
-    export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
+export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
 
-    {"\n".join(srun_commands)}
+TD_FOLDER="{run_folder_td}"
 
-    wait
+for frequency_folder in "$TD_FOLDER"/freq_*; do
+    frequency_tag="$(basename "$frequency_folder")"
+    input_file="$(find "$frequency_folder" -maxdepth 1 -name '*.ain' -print -quit)"
 
-    echo "All frequency jobs completed."
-    """
+    srun \\
+        --exclusive \\
+        --ntasks=1 \\
+        --cpus-per-task="${{SLURM_CPUS_PER_TASK}}" \\
+        --output="${{frequency_tag}}.out" \\
+        --error="${{frequency_tag}}.err" \\
+        bash -c 'cd "$1" && ./dmrg \\
+            -f "$(basename "$2")" \\
+            -p "{DMRG_PRECISION}" \\
+            "{operator_argument}"' \\
+        _ "$frequency_folder" "$input_file" &
+done
+
+wait
+
+echo "All frequency jobs completed."
+"""
 
             slurm_path.write_text(body, encoding="utf-8")
             print(f"Wrote batch script: {slurm_path}")
