@@ -481,7 +481,7 @@ def main() -> int:
             print(f"Created run folder: {run_folder_td}")
 
             # Save the command-line arguments to a JSON file.
-            args_path = run_folder_td.parent / f"input_args_td_{run_name}.json"
+            args_path = run_folder_td / f"input_args_td_{run_name}.json"
             save_arguments(args, args_path)
             print(f"Wrote arguments: {args_path}")
 
@@ -527,7 +527,7 @@ def main() -> int:
             print(f"Created run folder: {run_folder_td}")
 
             # Save the command-line arguments to a JSON file.
-            args_path = run_folder_td.parent / f"input_args_td_{run_name}.json"
+            args_path = run_folder_td / f"input_args_td_{run_name}.json"
             save_arguments(args, args_path)
             print(f"Wrote arguments: {args_path}")
 
