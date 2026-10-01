@@ -15,3 +15,5 @@
 !code/**/*.jl
 !code/**/*.pl
 !code/**/*.pbs
+!code/**/*.sh
+!code/**/*.ipynb
