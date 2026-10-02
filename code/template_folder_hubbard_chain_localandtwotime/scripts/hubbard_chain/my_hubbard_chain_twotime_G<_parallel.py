@@ -497,13 +497,13 @@ def process_twotime_results(
 
     data = collect_twotime_data(
         twotime_folder=twotime_folder,
-        run_name=run_name,
+        run_name=run_name.split("_", 1)[-1],  # Remove Gless from name,
         number_of_steps=number_of_steps,
         time_axis=time_axis,
         center_site=center_site,
     )
 
-    csv_path = twotime_folder / f"{run_name}_P2_c_P3_centersite={center_site}.csv"
+    csv_path = base_directory / f"{run_name}_P2_c_P3_centersite={center_site}.csv"
 
     save_twotime_csv(
         data=data,
@@ -584,7 +584,7 @@ def main() -> int:
             raise ValueError("Pump_time_steps must be positive")
         csv_path = process_twotime_results(
             base_directory=restart_path.parent,
-            run_name=args.process.name.split("_", 1)[-1],  # Remove Gless from name
+            run_name=args.process.name,
             number_of_steps=args.Pump_time_steps,
             time_axis=time_axis,
             center_site=args.center_site,
