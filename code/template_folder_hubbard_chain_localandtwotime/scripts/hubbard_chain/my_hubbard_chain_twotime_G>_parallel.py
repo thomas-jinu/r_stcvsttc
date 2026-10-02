@@ -94,11 +94,6 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of independent time steps to run simultaneously.",
     )
-    parser.add_argument(
-        "--process",
-        type=Path,
-        help="Only process an existing twotime_RUN_NAME directory.",
-    )
 
     return parser.parse_args()
 
@@ -578,19 +573,6 @@ def main() -> int:
         t_delay=args.Pump_time_delay,
         sigma=args.Pump_pulse_width,
     )
-
-    if args.process:
-        if args.Pump_time_steps <= 0:
-            raise ValueError("Pump_time_steps must be positive")
-        csv_path = process_twotime_results(
-            base_directory=restart_path.parent,
-            run_name=args.process.name,
-            number_of_steps=args.Pump_time_steps,
-            time_axis=time_axis,
-            center_site=args.center_site,
-        )
-        print(f"Wrote post-processed data: {csv_path}")
-        return 0
 
     validate_args(args)
 

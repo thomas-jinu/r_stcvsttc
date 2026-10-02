@@ -104,12 +104,6 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="CPU cores assigned for this run.",
     )
-    parser.add_argument(
-        "--process",
-        type=Path,
-        metavar="OUTPUT_FILE",
-        help="Process an existing output file.",
-    )
 
     return parser.parse_args()
 
@@ -434,18 +428,6 @@ def main() -> int:
         t_delay=args.Pump_time_delay,
         sigma=args.Pump_pulse_width,
     )
-
-    if args.process:
-        if args.Pump_time_steps <= 0:
-            raise ValueError("Pump_time_steps must be positive")
-
-        csv_path = process_td_results(
-            output_path=args.process,
-            number_of_steps=args.Pump_time_steps,
-            time_axis=time_axis,
-        )
-        print(f"Wrote post-processed data: {csv_path}")
-        return 0
 
     validate_args(args)
 
