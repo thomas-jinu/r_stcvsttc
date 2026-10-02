@@ -100,6 +100,9 @@ def parse_args() -> argparse.Namespace:
         "--run", action="store_true", help="Run DMRG++ after generating input"
     )
     parser.add_argument(
+        "--submit", action="store_true", help="Submit DMRG++ job after generating input"
+    )
+    parser.add_argument(
         "--cpus-per-task",
         type=int,
         default=1,
@@ -541,6 +544,12 @@ echo "All frequency jobs completed."
             time_axis=time_axis,
         )
         print(f"Wrote post-processed data: {csv_path}")
+    elif args.submit:
+        subprocess.run(
+            ["sbatch", str(slurm_path)],
+            cwd=run_folder_td,
+            check=True,
+        )
     else:
         print("Inputs generated. Use --run to execute DMRG++.")
     return 0

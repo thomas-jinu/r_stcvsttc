@@ -57,6 +57,9 @@ def parse_args_input() -> argparse.Namespace:
     parser.add_argument(
         "--run", action="store_true", help="Run DMRG++ after generating input"
     )
+    parser.add_argument(
+        "--submit", action="store_true", help="Submit DMRG++ job after generating input"
+    )
     return parser.parse_args()
 
 
@@ -180,6 +183,12 @@ date
     if args.run:
         subprocess.run(
             ["./dmrg", "-f", str(input_path), "-p", f"{DMRG_PRECISION}"],
+            cwd=run_folder,
+            check=True,
+        )
+    elif args.submit:
+        subprocess.run(
+            ["sbatch", str(slurm_path)],
             cwd=run_folder,
             check=True,
         )
