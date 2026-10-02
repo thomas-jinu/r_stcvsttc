@@ -494,7 +494,6 @@ def main() -> int:
 
 set -euo pipefail
 
-module reset
 module load PrgEnv-gnu/8.7.0
 module load cray-mpich/9.1.0
 module load cray-libsci/26.03.0
