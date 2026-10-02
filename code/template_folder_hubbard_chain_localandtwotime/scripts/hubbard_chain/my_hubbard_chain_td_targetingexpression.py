@@ -485,7 +485,7 @@ def main() -> int:
 
         body = f"""#!/bin/bash
 #SBATCH --account=m5228
-#SBATCH --qos=regular
+#SBATCH --qos=shared
 #SBATCH --constraint=cpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
