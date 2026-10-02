@@ -681,7 +681,7 @@ for step_folder in "{run_folder_twotime}"/step_*; do
             --cpus-per-task={args.cpus_per_task} \\
             ./dmrg \\
             -f "input_twotime_{run_name}_apply.ain" \\
-            -p "{DMRG_PRECISION}"
+            -p f"{DMRG_PRECISION}"
 
         sleep 5  # pause for 10 seconds
 
@@ -691,7 +691,7 @@ for step_folder in "{run_folder_twotime}"/step_*; do
             --cpus-per-task={args.cpus_per_task} \\
             ./dmrg \\
             -f "input_twotime_{run_name}_evolve.ain" \\
-            -p "{DMRG_PRECISION}" \\
+            -p f"{DMRG_PRECISION}" \\
             "{TWOTIME_OPERATOR_LABEL}"
     ) &
 

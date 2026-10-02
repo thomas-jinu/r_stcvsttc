@@ -179,7 +179,7 @@ date
     # Run DMRG++ if the --run flag is provided, otherwise just generate the input files.
     if args.run:
         subprocess.run(
-            ["./dmrg", "-f", str(input_path), "-p", "{DMRG_PRECISION}"],
+            ["./dmrg", "-f", str(input_path), "-p", f"{DMRG_PRECISION}"],
             cwd=run_folder,
             check=True,
         )
