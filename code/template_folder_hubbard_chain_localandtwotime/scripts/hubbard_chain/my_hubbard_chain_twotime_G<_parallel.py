@@ -96,7 +96,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--process",
-        metavar="RUN_NAME",
+        type=Path,
         help="Only process an existing twotime_RUN_NAME directory.",
     )
 
@@ -488,7 +488,7 @@ def process_twotime_results(
     center_site: int,
 ) -> Path:
     """Collect an existing run and write its combined CSV file."""
-    twotime_folder = base_directory / f"twotime_{run_name}"
+    twotime_folder = base_directory / f"{run_name}"
 
     if not twotime_folder.is_dir():
         raise FileNotFoundError(f"Two-time run folder not found: {twotime_folder}")
@@ -584,7 +584,7 @@ def main() -> int:
             raise ValueError("Pump_time_steps must be positive")
         csv_path = process_twotime_results(
             base_directory=restart_path.parent,
-            run_name=args.process,
+            run_name=args.process.name.split("_", 1)[-1],  # Remove Gless from name
             number_of_steps=args.Pump_time_steps,
             time_axis=time_axis,
             center_site=args.center_site,
@@ -604,7 +604,7 @@ def main() -> int:
         raise FileNotFoundError(f"DMRG++ executable not found: {executable_path}")
 
     # Name file with pump frequency for clarity
-    run_folder_twotime = restart_path.parent / f"twotime_{run_name}"
+    run_folder_twotime = restart_path.parent / f"Gless_twotime_{run_name}"
     run_folder_twotime.mkdir(parents=True, exist_ok=True)
     print(f"Created run folder: {run_folder_twotime}")
 
@@ -623,7 +623,7 @@ def main() -> int:
 
         restart_filename = f"../../{run_name}/Recovery{step}{run_name}"
 
-        input_path_apply = step_folder / f"input_{run_name}_apply.ain"
+        input_path_apply = step_folder / f"input_twotime_{run_name}_apply.ain"
         input_path_apply.write_text(
             build_input_apply(
                 args,
@@ -636,7 +636,7 @@ def main() -> int:
             encoding="utf-8",
         )
 
-        input_path_evolve = step_folder / f"input_{run_name}_evolve.ain"
+        input_path_evolve = step_folder / f"input_twotime_{run_name}_evolve.ain"
         input_path_evolve.write_text(
             build_input_evolve(
                 args,
@@ -644,7 +644,7 @@ def main() -> int:
                 step=step,
                 time_axis=time_axis,
                 pump_axis=pump_axis,
-                restart_filename_evolve=f"twotime_{run_name}" + "_apply",
+                restart_filename_evolve=f"twotime_{run_name}_apply",
             ),
             encoding="utf-8",
         )
@@ -698,7 +698,7 @@ for step_folder in "{run_folder_twotime}"/step_*; do
             --ntasks=1 \\
             --cpus-per-task={args.cpus_per_task} \\
             ./dmrg \\
-            -f "input_{run_name}_apply.ain" \\
+            -f "input_twotime_{run_name}_apply.ain" \\
             -p "{DMRG_PRECISION}"
 
         sleep 5  # pause for 10 seconds
@@ -708,7 +708,7 @@ for step_folder in "{run_folder_twotime}"/step_*; do
             --ntasks=1 \\
             --cpus-per-task={args.cpus_per_task} \\
             ./dmrg \\
-            -f "input_{run_name}_evolve.ain" \\
+            -f "input_twotime_{run_name}_evolve.ain" \\
             -p "{DMRG_PRECISION}" \\
             "{TWOTIME_OPERATOR_LABEL}"
     ) &
@@ -753,7 +753,7 @@ date
 
         csv_path = process_twotime_results(
             base_directory=restart_path.parent,
-            run_name=run_name,
+            run_name=f"twotime_{run_name}",
             center_site=args.center_site,
             number_of_steps=args.Pump_time_steps,
             time_axis=time_axis,
