@@ -153,7 +153,7 @@ def build_input_td(
     # Finite rows is the ordering of loops in DMRG++ input.
     # Numeric value 3 = 1 + 2; 1: save and 2: usefastwft
     finite_rows = ",\n".join(
-        f"    [@auto, {args.finite_kept}, 3]" for _ in range(finite_loops)
+        f"    [@auto, {args.finite_kept}, 2]" for _ in range(finite_loops)
     )
 
     # Build the AversusTime table for the pump values.
@@ -215,7 +215,7 @@ def build_input_td(
                         f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
                         f'RestartFilename = "{restart_filename}";',
-                        "GsWeight = 0.1;",
+                        "GsWeight = 0.0;",
                     ]
                 ),
             ]

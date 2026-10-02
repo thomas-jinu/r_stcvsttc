@@ -198,7 +198,7 @@ def build_input_apply(
                         'Version = "stc_vs_ttc_apply";',
                         f'OutputFile = "{run_name}_apply";',
                         f'RestartFilename = "{restart_filename_apply}";',
-                        "GsWeight = 0.1;",
+                        "GsWeight = 0.0;",
                     ]
                 ),
             ]
@@ -307,7 +307,7 @@ def build_input_evolve(
                         'Version = "stc_vs_ttc_apply_evolve";',
                         f'OutputFile = "{run_name}_evolve";',
                         f'RestartFilename = "{restart_filename_evolve}";',
-                        "GsWeight = 0.1;",
+                        "GsWeight = 0.0;",
                     ]
                 ),
             ]
