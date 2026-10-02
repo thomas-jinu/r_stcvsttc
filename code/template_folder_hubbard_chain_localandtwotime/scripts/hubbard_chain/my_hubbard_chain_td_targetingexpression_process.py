@@ -4,28 +4,20 @@ Generate and optionally run a two-time Hubbard-chain calculation.
 
 import argparse
 import csv
-import json
-import math
-import os
 import re
-import shutil
-import subprocess
-from collections.abc import Iterable
-from datetime import UTC, datetime
 from pathlib import Path
-
-import numpy as np
 
 # Location of the current DMRG++ executables for different clusters. Adjust these paths as needed. The location is printed when the script is completed.
 DMRG_EXECUTABLES = {
     "local": Path(
         "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
     ),
-    # "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
-    "nersc": Path(
-        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
-    ),
+    "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    # "nersc": Path(
+    #     "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
+    # ),
 }
+
 
 # DMRG Settings
 DMRG_PRECISION = 12

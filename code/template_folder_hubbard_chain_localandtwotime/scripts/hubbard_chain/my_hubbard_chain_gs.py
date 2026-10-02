@@ -22,10 +22,10 @@ DMRG_EXECUTABLES = {
     "local": Path(
         "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
     ),
-    # "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
-    "nersc": Path(
-        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
-    ),
+    "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    # "nersc": Path(
+    #     "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
+    # ),
 }
 
 # DMRG Settings
