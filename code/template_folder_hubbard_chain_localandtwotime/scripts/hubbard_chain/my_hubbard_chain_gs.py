@@ -8,7 +8,7 @@ import argparse
 import shutil
 import subprocess
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Resolve paths so that scripts live inside scripts/hubbard_chain, and the project root is two levels up.
@@ -18,11 +18,18 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Location of the current DMRG++ executables for different clusters. Adjust these paths as needed. The location is printed when the script is completed.
-DMRG_PRECISION = 12
 DMRG_EXECUTABLES = {
-    "local": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
-    "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    "local": Path(
+        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
+    ),
+    # "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    "nersc": Path(
+        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
+    ),
 }
+
+# DMRG Settings
+DMRG_PRECISION = 12
 
 
 # Define all the input arguments for the script, including the cluster choice and the --run flag.
@@ -48,7 +55,7 @@ def parse_args_input() -> argparse.Namespace:
     parser.add_argument("finite_kept", type=int)
     parser.add_argument("cluster", choices=["local", "isaac", "nersc"])
     parser.add_argument(
-        "--run", action="store_true", help="Run DMRG++ after generating the input."
+        "--run", action="store_true", help="Run DMRG++ after generating input"
     )
     return parser.parse_args()
 
@@ -112,7 +119,8 @@ def build_input(args: argparse.Namespace, up: int, down: int, run_name: str) -> 
 def main() -> int:
     args = parse_args_input()
 
-    # Create the run name based on the input parameters, and prepare the run folder and executable path.
+    # Create the run name based on the input parameters
+    # Prepare the run folder and executable path.
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     run_name = f"N={args.sites}_Nup={args.up}_Ndown={args.down}_{timestamp}"
@@ -124,23 +132,16 @@ def main() -> int:
     print(f"Using DMRG++ executable for cluster '{args.cluster}': {executable_path}")
     shutil.copy2(executable_path, run_folder / "dmrg")
 
-    # Create input file for Ainur and write it to the run folder. If --run is specified, execute DMRG++ with the generated input. If a cluster is specified, create a SLURM batch script for submission.
-
+    # Create input file for Ainur and write it to the run folder.
     input_path = run_folder / f"input_{run_name}.ain"
     input_path.write_text(
         build_input(args, args.up, args.down, run_name), encoding="utf-8"
     )
     print(f"Wrote Ainur input: {input_path}")
 
-    if args.run:
-        subprocess.run(
-            ["./dmrg", "-f", str(input_path), "-p", "{DMRG_PRECISION}"],
-            cwd=run_folder,
-            check=True,
-        )
-    elif args.cluster == "nersc":
+    # Generate batch script for NERSC if the cluster is set to 'nersc'.
+    if args.cluster == "nersc":
         slurm_path = run_folder / f"batch_{run_name}.slurm"
-
         body = f"""#!/bin/bash
 #SBATCH --account=m5228
 #SBATCH --qos=shared
@@ -175,6 +176,14 @@ date
 """
         slurm_path.write_text(body, encoding="utf-8")
         print(f"Wrote batch script: {slurm_path}")
+
+    # Run DMRG++ if the --run flag is provided, otherwise just generate the input files.
+    if args.run:
+        subprocess.run(
+            ["./dmrg", "-f", str(input_path), "-p", "{DMRG_PRECISION}"],
+            cwd=run_folder,
+            check=True,
+        )
     else:
         print("Input generated. Use --run to start DMRG++.")
     return 0

@@ -16,14 +16,23 @@ from pathlib import Path
 
 import numpy as np
 
+# Location of the current DMRG++ executables for different clusters. Adjust these paths as needed. The location is printed when the script is completed.
 DMRG_EXECUTABLES = {
-    "local": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
-    "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    "local": Path(
+        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
+    ),
+    # "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    "nersc": Path(
+        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
+    ),
 }
 
+# DMRG Settings
 DMRG_PRECISION = 12
-DEFINE_OPERATORS_DMRGPP = "double:nup*ndown,hole:identity+(-1.0)*nup+(-1.0)*ndown+nup*ndown,parity:identity+(-2.0)*n+4.0*nup*ndown,local_moment:0.75*n+(-1.5)*nup*ndown"
-OPERATOR_LABELS = {
+
+TD_DEFINE_OPERATORS_DMRGPP = "double:nup*ndown,hole:identity+(-1.0)*nup+(-1.0)*ndown+nup*ndown,parity:identity+(-2.0)*n+4.0*nup*ndown,local_moment:0.75*n+(-1.5)*nup*ndown"
+
+TD_OPERATOR_LABELS = {
     "<P0|n|P0>",
     "<gs|n|gs>",
     "<P0|sz|P0>",
@@ -39,10 +48,12 @@ OPERATOR_LABELS = {
     "<P0|n*n|P0>",
     "<gs|n*n|gs>",
 }
-COLLECTION_MARKER = "FiniteLoops printing ends"
 
-NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
-OPERATOR_PATTERN = re.compile(
+TD_COLLECTION_MARKER = "FiniteLoops printing ends"
+
+TD_NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+
+TD_OPERATOR_PATTERN = re.compile(
     r"""
     ^\s*
     (?P<site>\d+)\s+
@@ -84,28 +95,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("Pump_pulse_width", type=float)
     parser.add_argument("Pump_time_steps", type=int)
     parser.add_argument("cluster", choices=DMRG_EXECUTABLES)
-    parser.add_argument("--frequency-start", type=float, default=0.0)
-    parser.add_argument("--frequency-stop", type=float, default=10.0)
-    parser.add_argument("--frequency-step", type=float, default=0.25)
-    mode = parser.add_mutually_exclusive_group()
+    parser.add_argument(
+        "--run", action="store_true", help="Run DMRG++ after generating input"
+    )
     parser.add_argument(
         "--cpus-per-task",
         type=int,
         default=1,
         help="CPU cores assigned for this run.",
     )
-    mode.add_argument(
-        "--run",
-        action="store_true",
-        help="Generate inputs, run DMRG++, and process the results.",
-    )
     parser.add_argument(
-        "--launcher",
-        choices=["local", "srun"],
-        default="local",
-        help="The launcher to use for running the simulation.",
-    )
-    mode.add_argument(
         "--process",
         type=Path,
         metavar="OUTPUT_FILE",
@@ -113,6 +112,30 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+
+def validate_args(args: argparse.Namespace) -> None:
+    """Validate constraints required by the finite-loop construction."""
+    if args.sites <= 2:
+        raise ValueError("sites must be greater than 2")
+    if args.Pump_time_steps <= 0 or args.Pump_time_steps % 2 == 0:
+        raise ValueError("Pump_time_steps must be a positive odd number")
+    if args.TSPAdvanceEach <= 0:
+        raise ValueError("TSPAdvanceEach must be positive")
+    if args.TSPAdvanceEach % (args.sites - 2) != 0:
+        raise ValueError("TSPAdvanceEach must be a multiple of sites - 2")
+    if args.Pump_pulse_width == 0:
+        raise ValueError("Pump_pulse_width must be nonzero")
+
+
+def save_arguments(args: argparse.Namespace, output_path: Path) -> None:
+    """Save command-line arguments as JSON."""
+    values = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in vars(args).items()
+    }
+    with output_path.open("w", encoding="utf-8") as file:
+        json.dump(values, file, indent=2)
 
 
 def build_input_td(
@@ -170,7 +193,7 @@ def build_input_td(
                         "# --- Fock Space parameters ---",
                         f"TargetElectronsUp = {args.up};",
                         f"TargetElectronsDown = {args.down};",
-                        f'DefineOperators="{DEFINE_OPERATORS_DMRGPP}";',
+                        f'DefineOperators="{TD_DEFINE_OPERATORS_DMRGPP}";',
                     ]
                 ),
                 "\n".join(
@@ -187,9 +210,9 @@ def build_input_td(
                 "\n".join(
                     [
                         "# --- Solver / run control ---",
-                        'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression,minimizedisk";',
+                        'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression";',
                         'Version = "stc_vs_ttc";',
-                        # f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
+                        f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
                         f'RestartFilename = "{restart_filename}";',
                         "GsWeight = 0.1;",
@@ -244,11 +267,11 @@ def read_operator_output(
 ) -> dict[str, list[tuple[int, complex, float]]]:
     """Read operator values grouped by operator label."""
 
-    operators = {label: [] for label in OPERATOR_LABELS}
+    operators = {label: [] for label in TD_OPERATOR_LABELS}
 
     with output_path.open("r", encoding="utf-8") as file:
         for line in file:
-            match = OPERATOR_PATTERN.match(line)
+            match = TD_OPERATOR_PATTERN.match(line)
 
             if match is None:
                 continue
@@ -283,7 +306,7 @@ def collect_td_data(
 
     Repeated keys retain the last value.
     """
-    data = {label: {} for label in OPERATOR_LABELS}
+    data = {label: {} for label in TD_OPERATOR_LABELS}
 
     step_data = read_operator_output(output_path)
 
@@ -361,38 +384,13 @@ def process_td_results(
     return csv_path
 
 
-def validate_args(args: argparse.Namespace) -> None:
-    """Validate constraints required by the finite-loop construction."""
-    if args.sites <= 2:
-        raise ValueError("sites must be greater than 2")
-    if args.Pump_time_steps <= 0 or args.Pump_time_steps % 2 == 0:
-        raise ValueError("Pump_time_steps must be a positive odd number")
-    if args.TSPAdvanceEach <= 0:
-        raise ValueError("TSPAdvanceEach must be positive")
-    if args.TSPAdvanceEach % (args.sites - 2) != 0:
-        raise ValueError("TSPAdvanceEach must be a multiple of sites - 2")
-    if args.Pump_pulse_width == 0:
-        raise ValueError("Pump_pulse_width must be nonzero")
-
-
-def save_arguments(args: argparse.Namespace, output_path: Path) -> None:
-    """Save command-line arguments as JSON."""
-    values = {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in vars(args).items()
-    }
-    with output_path.open("w", encoding="utf-8") as file:
-        json.dump(values, file, indent=2)
-
-
 def run_dmrg(
     working_directory: Path,
     input_path: Path,
     operator: str | None = None,
-    launcher: str = "local",
     cpus_per_task: int = 1,
 ) -> None:
-    dmrg_command = [
+    command = [
         "./dmrg",
         "-f",
         input_path.name,
@@ -401,19 +399,7 @@ def run_dmrg(
     ]
 
     if operator is not None:
-        dmrg_command.append(operator)
-
-    if launcher == "srun":
-        command = [
-            "srun",
-            "--exclusive",
-            "--ntasks=1",
-            f"--cpus-per-task={cpus_per_task}",
-            "--wait",
-            *dmrg_command,
-        ]
-    else:
-        command = dmrg_command
+        command.append(operator)
 
     environment = os.environ.copy()
     environment["OMP_NUM_THREADS"] = str(cpus_per_task)
@@ -472,144 +458,52 @@ def main() -> int:
     if not executable_path.is_file():
         raise FileNotFoundError(f"DMRG++ executable not found: {executable_path}")
 
-    if args.run:
-        if args.cluster == "local":
-            # Stage 1: create the time-dependent reference states.
-            frequency_tag_value = frequency_tag(args.Pump_Frequency)
-            run_folder_td = restart_path.parent / f"td_{run_name}_{frequency_tag_value}"
-            run_folder_td.mkdir(parents=True, exist_ok=True)
-            print(f"Created run folder: {run_folder_td}")
+    # Name file with pump frequency for clarity
+    frequency_tag_value = frequency_tag(args.Pump_Frequency)
+    run_folder_td = restart_path.parent / f"td_{run_name}_{frequency_tag_value}"
+    run_folder_td.mkdir(parents=True, exist_ok=True)
+    print(f"Created run folder: {run_folder_td}")
 
-            # Save the command-line arguments to a JSON file.
-            args_path = run_folder_td / f"input_args_td_{run_name}.json"
-            save_arguments(args, args_path)
-            print(f"Wrote arguments: {args_path}")
+    # Save the command-line arguments to a JSON file.
+    args_path = run_folder_td / f"input_args_td_{run_name}.json"
+    save_arguments(args, args_path)
+    print(f"Wrote arguments: {args_path}")
 
-            # Copy the DMRG++ executable to the run folder.
-            print(
-                f"Using DMRG++ executable for cluster '{args.cluster}': {executable_path}"
-            )
-            shutil.copy2(executable_path, run_folder_td / "dmrg")
+    # Copy the DMRG++ executable to the run folder.
+    print(f"Using DMRG++ executable for cluster '{args.cluster}': {executable_path}")
+    shutil.copy2(executable_path, run_folder_td / "dmrg")
 
-            # Write the pump table to a CSV file for reference.
-            write_pump_table(
-                pump_table=zip(time_axis, pump_axis),
-                output_path=run_folder_td / "pump_table.csv",
-            )
+    # Write the pump table to a CSV file for reference.
+    write_pump_table(
+        pump_table=zip(time_axis, pump_axis),
+        output_path=run_folder_td / "pump_table.csv",
+    )
 
-            input_path = run_folder_td / f"input_{run_name}.ain"
-            input_path.write_text(
-                build_input_td(args, run_name, time_axis, pump_axis), encoding="utf-8"
-            )
-            print(f"Wrote Ainur input: {input_path}")
+    input_path = run_folder_td / f"input_td_{run_name}.ain"
+    input_path.write_text(
+        build_input_td(
+            args,
+            "td_" + run_name + "_" + frequency_tag_value,
+            time_axis,
+            pump_axis,
+            restart_filename=f"../{restart_path.name}",
+        ),
+        encoding="utf-8",
+    )
+    print(f"Wrote Ainur input: {input_path}")
 
-            # Run DMRG++ with the generated input and collect the results.
-            run_dmrg(
-                run_folder_td,
-                input_path,
-                launcher=args.launcher,
-                cpus_per_task=args.cpus_per_task,
-                operator=",".join(sorted(OPERATOR_LABELS)),
-            )
+    operator_argument = ",".join(sorted(TD_OPERATOR_LABELS))
 
-            # Process the results and write them to a CSV file.
-            csv_path = process_td_results(
-                output_path=run_folder_td / f"runForinput_{run_name}.cout",
-                number_of_steps=args.Pump_time_steps,
-                time_axis=time_axis,
-            )
-            print(f"Wrote post-processed data: {csv_path}")
+    if args.cluster == "nersc":
+        slurm_path = run_folder_td / f"batch_{run_name}.slurm"
 
-        elif args.cluster == "nersc":
-            # Stage 1: create all frequency folders and inputs.
-            run_folder_td = restart_path.parent / f"td_{run_name}"
-            run_folder_td.mkdir(parents=True, exist_ok=True)
-            print(f"Created run folder: {run_folder_td}")
-
-            # Save the command-line arguments to a JSON file.
-            args_path = run_folder_td / f"input_args_td_{run_name}.json"
-            save_arguments(args, args_path)
-            print(f"Wrote arguments: {args_path}")
-
-            print(
-                f"Using DMRG++ executable for cluster "
-                f"'{args.cluster}': {executable_path}"
-            )
-
-            frequency_entries = []
-
-            frequencies = np.arange(
-                args.frequency_start,
-                args.frequency_stop + args.frequency_step / 2,
-                args.frequency_step,
-            )
-
-            for frequency_value in frequencies:
-                frequency = float(round(frequency_value, 9))
-                frequency_tag_value = frequency_tag(frequency)
-                frequency_folder = run_folder_td / frequency_tag_value
-                frequency_folder.mkdir(parents=True, exist_ok=True)
-
-                frequency_args = argparse.Namespace(**vars(args))
-                frequency_args.Pump_Frequency = frequency
-
-                frequency_run_name = f"{run_name}_{frequency_tag_value}"
-                frequency_time_axis = create_time_axis(
-                    nsteps=args.Pump_time_steps,
-                    step_size=args.TSPTau,
-                )
-                frequency_pump_axis = create_pump_axis(
-                    frequency_time_axis,
-                    amplitude=args.Pump_Amplitude,
-                    omega_pump=frequency,
-                    t_delay=args.Pump_time_delay,
-                    sigma=args.Pump_pulse_width,
-                )
-
-                shutil.copy2(executable_path, frequency_folder / "dmrg")
-
-                write_pump_table(
-                    pump_table=zip(
-                        frequency_time_axis,
-                        frequency_pump_axis,
-                    ),
-                    output_path=frequency_folder / "pump_table.csv",
-                )
-
-                input_path = frequency_folder / f"input_{frequency_run_name}.ain"
-                input_path.write_text(
-                    build_input_td(
-                        frequency_args,
-                        frequency_run_name,
-                        frequency_time_axis,
-                        frequency_pump_axis,
-                        restart_filename=f"../../{restart_path.name}",
-                    ),
-                    encoding="utf-8",
-                )
-
-                print(f"Wrote Ainur input: {input_path}")
-
-                frequency_entries.append(
-                    {
-                        "frequency": frequency,
-                        "tag": frequency_tag_value,
-                        "folder": frequency_folder,
-                        "input": input_path,
-                    }
-                )
-
-            slurm_path = run_folder_td / f"batch_{run_name}.slurm"
-
-            operator_argument = ",".join(sorted(OPERATOR_LABELS))
-
-            body = f"""#!/bin/bash
+        body = f"""#!/bin/bash
 #SBATCH --account=m5228
 #SBATCH --qos=regular
 #SBATCH --constraint=cpu
-#SBATCH --nodes=2
-#SBATCH --ntasks=8
-#SBATCH --cpus-per-task=16
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task={args.cpus_per_task}
 #SBATCH --time=48:00:00
 #SBATCH --job-name=dmrg_frequency
 #SBATCH --output=%x-%j.out
@@ -626,34 +520,45 @@ module load cray-hdf5/1.14.3.7
 
 export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
 
-TD_FOLDER="{run_folder_td}"
+cd "{run_folder_td}"
 
-for frequency_folder in "$TD_FOLDER"/freq_*; do
-    frequency_tag="$(basename "$frequency_folder")"
-    input_file="$(find "$frequency_folder" -maxdepth 1 -name '*.ain' -print -quit)"
+srun \\
+    --exclusive \\
+    --ntasks=1 \\
+    --cpus-per-task={args.cpus_per_task} \\
+    ./dmrg \\
+    -f "{input_path.name}" \\
+    -p "{DMRG_PRECISION}" \\
+    "{operator_argument}"
 
-    srun \\
-        --exclusive \\
-        --ntasks=1 \\
-        --output="${{frequency_tag}}.out" \\
-        --error="${{frequency_tag}}.err" \\
-        bash -c 'cd "$1" && ./dmrg \\
-            -f "$(basename "$2")" \\
-            -p "{DMRG_PRECISION}" \\
-            "{operator_argument}"' \\
-        _ "$frequency_folder" "$input_file" &
-done
+
 
 wait
 
 echo "All frequency jobs completed."
 """
 
-            slurm_path.write_text(body, encoding="utf-8")
-            print(f"Wrote batch script: {slurm_path}")
+        slurm_path.write_text(body, encoding="utf-8")
+        print(f"Wrote batch script: {slurm_path}")
 
-        else:
-            raise ValueError(f"Unsupported cluster: {args.cluster}")
+    # If the --run flag is provided, execute DMRG++ with the generated input and collect the results.
+
+    if args.run:
+        # Run DMRG++ with the generated input and collect the results.
+        run_dmrg(
+            run_folder_td,
+            input_path,
+            cpus_per_task=args.cpus_per_task,
+            operator=operator_argument,
+        )
+
+        # Process the results and write them to a CSV file.
+        csv_path = process_td_results(
+            output_path=run_folder_td / f"runForinput_{run_name}.cout",
+            number_of_steps=args.Pump_time_steps,
+            time_axis=time_axis,
+        )
+        print(f"Wrote post-processed data: {csv_path}")
     else:
         print("Inputs generated. Use --run to execute DMRG++.")
     return 0

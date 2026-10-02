@@ -17,22 +17,31 @@ from pathlib import Path
 
 import numpy as np
 
+# Location of the current DMRG++ executables for different clusters. Adjust these paths as needed. The location is printed when the script is completed.
 DMRG_EXECUTABLES = {
-    "local": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
-    "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    "local": Path(
+        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
+    ),
+    # "nersc": Path("/global/common/software/m5228/dmrgpp/installdir/bin/dmrg"),
+    "nersc": Path(
+        "/Users/qqt/Documents/Codes/dmrgpp_pvector/copy_dmrg/installdir/bin/dmrg"
+    ),
 }
 
-
+# DMRG Settings
 DMRG_PRECISION = 12
-OPERATOR_LABEL = "<P2|c|P3>"
-COLLECTION_MARKER = "FiniteLoops printing ends"
 
-NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
-OPERATOR_PATTERN = re.compile(
+TWOTIME_OPERATOR_LABEL = "<P2|c|P3>"
+
+TWOTIME_COLLECTION_MARKER = "FiniteLoops printing ends"
+
+TWOTIME_NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+
+TWOTIME_OPERATOR_PATTERN = re.compile(
     rf"^\s*(\d+)\s+"
-    rf"\(\s*({NUMBER_PATTERN})\s*,\s*({NUMBER_PATTERN})\s*\)\s+"
-    rf"({NUMBER_PATTERN})\s+"
-    rf"{re.escape(OPERATOR_LABEL)}"
+    rf"\(\s*({TWOTIME_NUMBER_PATTERN})\s*,\s*({TWOTIME_NUMBER_PATTERN})\s*\)\s+"
+    rf"({TWOTIME_NUMBER_PATTERN})\s+"
+    rf"{re.escape(TWOTIME_OPERATOR_LABEL)}"
 )
 
 
@@ -44,18 +53,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("sites", type=int, help="Chain length N")
     parser.add_argument("up", type=int, help="Number of spin-up electrons")
     parser.add_argument("down", type=int, help="Number of spin-down electrons")
-    parser.add_argument("center_site", type=int, help="Index of the center site")
     parser.add_argument("t", type=float, help="Hopping parameter t")
     parser.add_argument("U", type=float, help="Hubbard interaction U")
     parser.add_argument("potentialV", type=float, help="Potential V")
     parser.add_argument("gs_filename", type=Path, help="Ground-state file location")
     parser.add_argument(
         "finite_kept", type=int, help="Number of states in finite loops"
-    )
-    parser.add_argument(
-        "finite_loops_apply",
-        type=int,
-        help="Number of finite loops for applying the operator step",
     )
     parser.add_argument(
         "TSPAdvanceEach",
@@ -69,18 +72,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("Pump_pulse_width", type=float)
     parser.add_argument("Pump_time_steps", type=int)
     parser.add_argument("cluster", choices=DMRG_EXECUTABLES)
-    mode = parser.add_mutually_exclusive_group()
+    parser.add_argument("center_site", type=int, help="Index of the center site")
     parser.add_argument(
-        "--parallel-steps",
+        "finite_loops_apply",
         type=int,
-        default=1,
-        help="Number of independent time steps to run simultaneously.",
+        help="Number of finite loops for applying the operator step",
     )
+    parser.add_argument("td_folder", type=Path, help="Folder name for td files")
     parser.add_argument(
-        "--launcher",
-        choices=["local", "srun"],
-        default="local",
-        help="Run processes directly or launch them with srun.",
+        "--run", action="store_true", help="Run DMRG++ after generating inputs"
     )
     parser.add_argument(
         "--cpus-per-task",
@@ -88,12 +88,13 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="CPU cores assigned to each DMRG++ process.",
     )
-    mode.add_argument(
-        "--run",
-        action="store_true",
-        help="Generate inputs, run DMRG++, and process the results.",
+    parser.add_argument(
+        "--n-tasks",
+        type=int,
+        default=1,
+        help="Number of independent time steps to run simultaneously.",
     )
-    mode.add_argument(
+    parser.add_argument(
         "--process",
         metavar="RUN_NAME",
         help="Only process an existing twotime_RUN_NAME directory.",
@@ -102,85 +103,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_input_td(
-    args: argparse.Namespace,
-    run_name: str,
-    time_axis: list[float],
-    pump_axis: list[float],
-) -> str:
-    """Build the time-dependent reference-state input."""
-    finite_loops = args.Pump_time_steps * (args.TSPAdvanceEach // (args.sites - 2)) - 1
+def validate_args(args: argparse.Namespace) -> None:
+    """Validate constraints required by the finite-loop construction."""
+    if args.sites <= 2:
+        raise ValueError("sites must be greater than 2")
+    if args.Pump_time_steps <= 0 or args.Pump_time_steps % 2 == 0:
+        raise ValueError("Pump_time_steps must be a positive odd number")
+    if args.TSPAdvanceEach <= 0:
+        raise ValueError("TSPAdvanceEach must be positive")
+    if args.TSPAdvanceEach % (args.sites - 2) != 0:
+        raise ValueError("TSPAdvanceEach must be a multiple of sites - 2")
+    if args.Pump_pulse_width == 0:
+        raise ValueError("Pump_pulse_width must be nonzero")
 
-    # Finite rows is the ordering of loops in DMRG++ input.
-    # Numeric value 3 = 1 + 2; 1: save and 2: usefastwft
-    finite_rows = ",\n".join(
-        f"    [@auto, {args.finite_kept}, 3]" for _ in range(finite_loops)
-    )
 
-    aversus_t_table = "\n".join(
-        f"    [{time:.15g}, {pump:.15g}]," for time, pump in zip(time_axis, pump_axis)
-    ).rstrip(",")
-
-    return (
-        "\n\n".join(
-            [
-                "##Ainur1.0",
-                "\n".join(
-                    [
-                        "# --- Model parameters ---",
-                        f"TotalNumberOfSites = {args.sites};",
-                        "NumberOfTerms = 1;",
-                        "DegreesOfFreedom = 1;",
-                        'GeometryKind = "chain";',
-                        'GeometryOptions = "ConstantValues";',
-                        f"dir0:Connectors = [{args.t}];",
-                        f"hubbardU = [{args.U}, ...];",
-                        f"potentialV = [{args.potentialV}, ...];",
-                        'Model = "HubbardOneBand";',
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- Pump parameters --- #",
-                        "matrix AversusTime = [",
-                        f"{aversus_t_table}",
-                        "];",
-                        "GeometryFactor = exp:*:1.0i:!readTableAversusTime,%t;",
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- Fock Space parameters ---",
-                        f"TargetElectronsUp = {args.up};",
-                        f"TargetElectronsDown = {args.down};",
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- DMRG++ control parameters ---",
-                        "TruncationTolerance = 1e-12;",
-                        "FiniteLoops = [",
-                        finite_rows,
-                        "];",
-                        "RestartMapStages=0;",
-                        f'string P0="TimeEvolve{{tau={args.TSPTau},steps=5,advanceEach={args.TSPAdvanceEach}}}*|gs>";',
-                    ]
-                ),
-                "\n".join(
-                    [
-                        "# --- Solver / run control ---",
-                        'SolverOptions = "twositedmrg,usecomplex,restart,TargetingExpression";',
-                        'Version = "stc_vs_ttc";',
-                        f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
-                        f'OutputFile = "{run_name}";',
-                        f'RestartFilename = "../{Path(args.gs_filename).resolve().name}";',
-                        "GsWeight = 0.1;",
-                    ]
-                ),
-            ]
-        )
-        + "\n"
-    )
+def save_arguments(args: argparse.Namespace, output_path: Path) -> None:
+    """Save command-line arguments as JSON."""
+    values = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in vars(args).items()
+    }
+    with output_path.open("w", encoding="utf-8") as file:
+        json.dump(values, file, indent=2)
 
 
 def build_input_apply(
@@ -428,13 +372,13 @@ def read_operator_output(output_path: Path) -> np.ndarray:
 
     with output_path.open("r", encoding="utf-8") as file:
         for line in file:
-            if COLLECTION_MARKER in line:
+            if TWOTIME_COLLECTION_MARKER in line:
                 collecting = True
                 continue
-            if not collecting or OPERATOR_LABEL not in line:
+            if not collecting or TWOTIME_OPERATOR_LABEL not in line:
                 continue
 
-            match = OPERATOR_PATTERN.search(line)
+            match = TWOTIME_OPERATOR_PATTERN.search(line)
             if match is None:
                 continue
 
@@ -569,35 +513,10 @@ def process_twotime_results(
     return csv_path
 
 
-def validate_args(args: argparse.Namespace) -> None:
-    """Validate constraints required by the finite-loop construction."""
-    if args.sites <= 2:
-        raise ValueError("sites must be greater than 2")
-    if args.Pump_time_steps <= 0 or args.Pump_time_steps % 2 == 0:
-        raise ValueError("Pump_time_steps must be a positive odd number")
-    if args.TSPAdvanceEach <= 0:
-        raise ValueError("TSPAdvanceEach must be positive")
-    if args.TSPAdvanceEach % (args.sites - 2) != 0:
-        raise ValueError("TSPAdvanceEach must be a multiple of sites - 2")
-    if args.Pump_pulse_width == 0:
-        raise ValueError("Pump_pulse_width must be nonzero")
-
-
-def save_arguments(args: argparse.Namespace, output_path: Path) -> None:
-    """Save command-line arguments as JSON."""
-    values = {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in vars(args).items()
-    }
-    with output_path.open("w", encoding="utf-8") as file:
-        json.dump(values, file, indent=2)
-
-
 def run_dmrg(
     working_directory: Path,
     input_path: Path,
     operator: str | None = None,
-    launcher: str = "local",
     cpus_per_task: int = 1,
 ) -> None:
     dmrg_command = [
@@ -611,22 +530,11 @@ def run_dmrg(
     if operator is not None:
         dmrg_command.append(operator)
 
-    if launcher == "srun":
-        command = [
-            "srun",
-            "--exclusive",
-            "--ntasks=1",
-            f"--cpus-per-task={cpus_per_task}",
-            *dmrg_command,
-        ]
-    else:
-        command = dmrg_command
-
     environment = os.environ.copy()
     environment["OMP_NUM_THREADS"] = str(cpus_per_task)
 
     subprocess.run(
-        command,
+        dmrg_command,
         cwd=working_directory,
         check=True,
         env=environment,
@@ -637,21 +545,18 @@ def run_one_step(
     step_folder: Path,
     input_path_apply: Path,
     input_path_evolve: Path,
-    launcher: str,
     cpus_per_task: int,
 ) -> None:
     """Run the apply and evolve calculations for one time step."""
     run_dmrg(
         step_folder,
         input_path_apply,
-        launcher=launcher,
         cpus_per_task=cpus_per_task,
     )
     run_dmrg(
         step_folder,
         input_path_evolve,
-        operator=OPERATOR_LABEL,
-        launcher=launcher,
+        operator=TWOTIME_OPERATOR_LABEL,
         cpus_per_task=cpus_per_task,
     )
 
@@ -689,8 +594,8 @@ def main() -> int:
 
     validate_args(args)
 
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    run_name = f"N={args.sites}_Nup={args.up}_Ndown={args.down}_{timestamp}"
+    run_name = args.td_folder.name
+    print(f"Run name: {run_name}")
     executable_path = DMRG_EXECUTABLES[args.cluster]
 
     if not restart_path.is_file():
@@ -698,41 +603,15 @@ def main() -> int:
     if not executable_path.is_file():
         raise FileNotFoundError(f"DMRG++ executable not found: {executable_path}")
 
-    args_path = restart_path.parent / f"input_args_twotime_{run_name}.json"
-    save_arguments(args, args_path)
-    print(f"Wrote arguments: {args_path}")
-
-    # Stage 1: create the time-dependent reference states.
-    run_folder_td = restart_path.parent / f"td_{run_name}"
-    run_folder_td.mkdir(parents=True, exist_ok=True)
-    print(f"Created run folder: {run_folder_td}")
-
-    print(f"Using DMRG++ executable for cluster '{args.cluster}': {executable_path}")
-    shutil.copy2(executable_path, run_folder_td / "dmrg")
-
-    write_pump_table(
-        pump_table=zip(time_axis, pump_axis),
-        output_path=run_folder_td / "pump_table.csv",
-    )
-
-    input_path = run_folder_td / f"input_{run_name}.ain"
-    input_path.write_text(
-        build_input_td(args, run_name, time_axis, pump_axis), encoding="utf-8"
-    )
-    print(f"Wrote Ainur input: {input_path}")
-
-    if args.run:
-        run_dmrg(
-            run_folder_td,
-            input_path,
-            launcher=args.launcher,
-            cpus_per_task=args.cpus_per_task,
-        )
-
-    # Stage 2: create and optionally run each two-time calculation.
+    # Name file with pump frequency for clarity
     run_folder_twotime = restart_path.parent / f"twotime_{run_name}"
     run_folder_twotime.mkdir(parents=True, exist_ok=True)
     print(f"Created run folder: {run_folder_twotime}")
+
+    # Save the command-line arguments to a JSON file.
+    args_path = run_folder_twotime / f"input_args_twotime_{run_name}.json"
+    save_arguments(args, args_path)
+    print(f"Wrote arguments: {args_path}")
 
     step_jobs = []
 
@@ -742,13 +621,13 @@ def main() -> int:
         print(f"Created step folder: {step_folder}")
         shutil.copy2(executable_path, step_folder / "dmrg")
 
-        restart_filename = f"../../td_{run_name}/Recovery{step}{run_name}"
+        restart_filename = f"../../{run_name}/Recovery{step}{run_name}"
 
         input_path_apply = step_folder / f"input_{run_name}_apply.ain"
         input_path_apply.write_text(
             build_input_apply(
                 args,
-                run_name,
+                f"twotime_{run_name}",
                 step=step,
                 time_axis=time_axis,
                 pump_axis=pump_axis,
@@ -761,11 +640,11 @@ def main() -> int:
         input_path_evolve.write_text(
             build_input_evolve(
                 args,
-                run_name,
+                f"twotime_{run_name}",
                 step=step,
                 time_axis=time_axis,
                 pump_axis=pump_axis,
-                restart_filename_evolve=run_name + "_apply",
+                restart_filename_evolve=f"twotime_{run_name}" + "_apply",
             ),
             encoding="utf-8",
         )
@@ -775,32 +654,7 @@ def main() -> int:
 
         step_jobs.append((step_folder, input_path_apply, input_path_evolve))
 
-    if args.run:
-        with ThreadPoolExecutor(max_workers=args.parallel_steps) as executor:
-            futures = [
-                executor.submit(
-                    run_one_step,
-                    step_folder,
-                    input_path_apply,
-                    input_path_evolve,
-                    args.launcher,
-                    args.cpus_per_task,
-                )
-                for step_folder, input_path_apply, input_path_evolve in step_jobs
-            ]
-
-            for future in as_completed(futures):
-                future.result()
-
-        csv_path = process_twotime_results(
-            base_directory=restart_path.parent,
-            run_name=run_name,
-            center_site=args.center_site,
-            number_of_steps=args.Pump_time_steps,
-            time_axis=time_axis,
-        )
-        print(f"Wrote post-processed data: {csv_path}")
-    elif args.cluster == "nersc":
+    if args.cluster == "nersc":
         slurm_path = run_folder_twotime / f"batch_{run_name}.slurm"
 
         body = f"""#!/bin/bash
@@ -808,7 +662,7 @@ def main() -> int:
 #SBATCH --qos=shared
 #SBATCH --constraint=cpu
 #SBATCH --nodes=1
-#SBATCH --ntasks={args.parallel_steps}
+#SBATCH --ntasks={args.n_tasks}
 #SBATCH --cpus-per-task={args.cpus_per_task}
 #SBATCH --time=03:00:00
 #SBATCH --job-name=dmrg_twotime
@@ -829,20 +683,10 @@ export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
 export BASE=/global/common/software/m5228
 export LOCAL="$BASE/local"
 
+
 date
 
-# Stage 1: generate the recovery states.
-cd "{run_folder_td}"
-
-srun \\
-    --exclusive \\
-    --ntasks=1 \\
-    --cpus-per-task={args.cpus_per_task} \\
-    ./dmrg \\
-    -f "{input_path.name}" \\
-    -p "{DMRG_PRECISION}"
-
-# Stage 2: run separate time steps concurrently.
+# Run separate time steps concurrently.
 pids=()
 
 for step_folder in "{run_folder_twotime}"/step_*; do
@@ -857,6 +701,8 @@ for step_folder in "{run_folder_twotime}"/step_*; do
             -f "input_{run_name}_apply.ain" \\
             -p "{DMRG_PRECISION}"
 
+        sleep 5  # pause for 10 seconds
+
         srun \\
             --exclusive \\
             --ntasks=1 \\
@@ -864,13 +710,13 @@ for step_folder in "{run_folder_twotime}"/step_*; do
             ./dmrg \\
             -f "input_{run_name}_evolve.ain" \\
             -p "{DMRG_PRECISION}" \\
-            "{OPERATOR_LABEL}"
+            "{TWOTIME_OPERATOR_LABEL}"
     ) &
 
     pids+=("$!")
 done
 
-# Wait for every background step and detect failures.
+# Wait for every background step and detect  failures.
 failed=0
 
 for pid in "${{pids[@]}}"; do
@@ -888,6 +734,32 @@ date
 """
         slurm_path.write_text(body, encoding="utf-8")
         print(f"Wrote batch script: {slurm_path}")
+
+    if args.run:
+        with ThreadPoolExecutor(max_workers=args.n_tasks) as executor:
+            futures = [
+                executor.submit(
+                    run_one_step,
+                    step_folder,
+                    input_path_apply,
+                    input_path_evolve,
+                    args.cpus_per_task,
+                )
+                for step_folder, input_path_apply, input_path_evolve in step_jobs
+            ]
+
+            for future in as_completed(futures):
+                future.result()
+
+        csv_path = process_twotime_results(
+            base_directory=restart_path.parent,
+            run_name=run_name,
+            center_site=args.center_site,
+            number_of_steps=args.Pump_time_steps,
+            time_axis=time_axis,
+        )
+        print(f"Wrote post-processed data: {csv_path}")
+
     else:
         print("Inputs generated. Use --run to execute DMRG++.")
 
