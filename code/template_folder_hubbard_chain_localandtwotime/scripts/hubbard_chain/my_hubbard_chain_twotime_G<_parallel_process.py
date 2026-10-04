@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Only process an existing twotime_RUN_NAME directory.",
     )
+    parser.add_argument(
+        "--append-to-name",
+        type=str,
+        default="",
+        help="Append this to the name of the output file.",
+    )
     return parser.parse_args()
 
 
@@ -212,6 +218,7 @@ def process_twotime_results(
     number_of_steps: int,
     time_axis,
     center_site: int,
+    append_to_name: str = "",
 ) -> Path:
     """Collect an existing run and write its combined CSV file."""
     twotime_folder = base_directory / f"{run_name}"
@@ -229,7 +236,10 @@ def process_twotime_results(
         center_site=center_site,
     )
 
-    csv_path = base_directory / f"{run_name}_P2_c_P3_centersite={center_site}.csv"
+    csv_path = (
+        base_directory
+        / f"{run_name}{append_to_name}_P2_c_P3_centersite={center_site}.csv"
+    )
 
     save_twotime_csv(
         data=data,
@@ -252,6 +262,7 @@ def main() -> int:
         number_of_steps=len(time_axis),
         time_axis=time_axis,
         center_site=args.center_site,
+        append_to_name=args.append_to_name,
     )
     print(f"Wrote post-processed data: {csv_path}")
     return 0

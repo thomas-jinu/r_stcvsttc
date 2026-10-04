@@ -78,6 +78,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to the pump file.",
     )
 
+    parser.add_argument(
+        "--append-to-name",
+        type=str,
+        help="Append this to the name of the output file.",
+    )
+
     return parser.parse_args()
 
 
@@ -197,6 +203,7 @@ def process_td_results(
     output_path: Path,
     number_of_steps: int,
     time_axis,
+    append_to_name: str = "",
 ) -> Path:
     """Process an existing DMRG++ output file."""
 
@@ -208,7 +215,9 @@ def process_td_results(
 
     data = collect_td_data(output_path)
 
-    csv_path = output_path.with_name(f"{output_path.stem}_operators.csv")
+    csv_path = output_path.with_name(
+        f"{output_path.stem}{append_to_name}_operators.csv"
+    )
 
     save_td_csv(
         data=data,
@@ -228,6 +237,7 @@ def main() -> int:
         output_path=args.process_file,
         number_of_steps=len(time_axis),
         time_axis=time_axis,
+        append_to_name=args.append_to_name,
     )
     print(f"Wrote post-processed data: {csv_path}")
     return 0
