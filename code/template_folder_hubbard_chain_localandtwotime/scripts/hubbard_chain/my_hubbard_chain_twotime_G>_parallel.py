@@ -306,7 +306,6 @@ def build_input_evolve(
                         'Version = "stc_vs_ttc_apply_evolve";',
                         f'OutputFile = "{run_name}_evolve";',
                         f'RestartFilename = "{restart_filename_evolve}";',
-                        "Threads=4;",  # 4 is size of local hilbertspace in Hubbard.
                         "GsWeight = 0.0;",
                     ]
                 ),
@@ -641,10 +640,6 @@ def main() -> int:
 
         step_jobs.append((step_folder, input_path_apply, input_path_evolve))
 
-        num_threads_per_task = int(
-            args.cpus_per_task / 4
-        )  # 4 is size of local hilbertspace in Hubbard entered as THREADS in input.
-
     if args.cluster == "nersc":
         slurm_path = run_folder_twotime / f"batch_{run_name}.slurm"
 
@@ -669,7 +664,7 @@ module load cray-hdf5/1.14.3.7
 
 export CC=cc
 export CXX=CC
-export OMP_NUM_THREADS={num_threads_per_task}
+export OMP_NUM_THREADS={args.cpus_per_task}
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
 export BASE=/global/common/software/m5228

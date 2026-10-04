@@ -213,7 +213,6 @@ def build_input_td(
                         f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
                         f'RestartFilename = "{restart_filename}";',
-                        "Threads=4;",  # 4 is size of local hilbertspace in Hubbard.
                         "GsWeight = 0.0;",
                     ]
                 ),
@@ -481,10 +480,6 @@ def main() -> int:
 
     operator_argument = ",".join(sorted(TD_OPERATOR_LABELS))
 
-    num_threads_per_task = int(
-        args.cpus_per_task / 4
-    )  # 4 is size of local hilbertspace in Hubbard entered as THREADS in input.
-
     if args.cluster == "nersc":
         slurm_path = run_folder_td / f"batch_{run_name}.slurm"
 
@@ -508,7 +503,7 @@ module load cray-libsci/26.03.0
 module load cray-hdf5/1.14.3.7
 
 
-export OMP_NUM_THREADS={num_threads_per_task}
+export OMP_NUM_THREADS={args.cpus_per_task}
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
 
