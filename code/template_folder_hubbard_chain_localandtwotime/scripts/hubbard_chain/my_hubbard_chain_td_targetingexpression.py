@@ -509,11 +509,14 @@ module load cray-hdf5/1.14.3.7
 
 
 export OMP_NUM_THREADS=f"{num_threads_per_task}"
+export OMP_PROC_BIND=spread
+export OMP_PLACES=threads
 
 cd "{run_folder_td}"
 
 srun \\
     --exclusive \\
+    --nodes=1 \\
     --ntasks=1 \\
     --cpus-per-task={args.cpus_per_task} \\
     ./dmrg \\
