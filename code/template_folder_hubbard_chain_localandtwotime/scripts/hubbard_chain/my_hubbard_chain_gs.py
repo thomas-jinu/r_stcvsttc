@@ -110,6 +110,7 @@ def build_input(args: argparse.Namespace, up: int, down: int, run_name: str) -> 
                         "# --- Solver / run control ---",
                         'SolverOptions = "twositedmrg,usecomplex";',
                         'Version = "stc_vs_ttc";',
+                        "Threads=4;",  # 4 is size of local hilbertspace in Hubbard.
                         f'OutputFile = "{run_name}";',
                     ]
                 ),
@@ -142,6 +143,10 @@ def main() -> int:
     )
     print(f"Wrote Ainur input: {input_path}")
 
+    num_threads_per_task = int(
+        args.cpus_per_task / 4
+    )  # 4 is size of local hilbertspace in Hubbard entered as THREADS in input.
+
     # Generate batch script for NERSC if the cluster is set to 'nersc'.
     if args.cluster == "nersc":
         slurm_path = run_folder / f"batch_{run_name}.slurm"
@@ -166,7 +171,7 @@ module load cray-hdf5/1.14.3.7
 
 export CC=cc
 export CXX=CC
-export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
+export OMP_NUM_THREADS=f"{num_threads_per_task}"
 export BASE=/global/common/software/m5228
 export LOCAL="$BASE/local"
 
