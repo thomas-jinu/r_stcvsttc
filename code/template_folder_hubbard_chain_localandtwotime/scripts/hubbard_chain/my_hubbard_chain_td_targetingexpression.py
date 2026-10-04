@@ -508,7 +508,7 @@ module load cray-libsci/26.03.0
 module load cray-hdf5/1.14.3.7
 
 
-export OMP_NUM_THREADS=f"{num_threads_per_task}"
+export OMP_NUM_THREADS={num_threads_per_task}
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
 

@@ -669,7 +669,7 @@ module load cray-hdf5/1.14.3.7
 
 export CC=cc
 export CXX=CC
-export OMP_NUM_THREADS=f"{num_threads_per_task}"
+export OMP_NUM_THREADS={num_threads_per_task}
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
 export BASE=/global/common/software/m5228
