@@ -110,7 +110,6 @@ def build_input(args: argparse.Namespace, up: int, down: int, run_name: str) -> 
                         "# --- Solver / run control ---",
                         'SolverOptions = "twositedmrg,usecomplex";',
                         'Version = "stc_vs_ttc";',
-                        "Threads=4;",  # 4 is size of local hilbertspace in Hubbard.
                         f'OutputFile = "{run_name}";',
                     ]
                 ),
@@ -171,7 +170,7 @@ module load cray-hdf5/1.14.3.7
 
 export CC=cc
 export CXX=CC
-export OMP_NUM_THREADS=f"{num_threads_per_task}"
+export OMP_NUM_THREADS={num_threads_per_task}
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
 export BASE=/global/common/software/m5228
