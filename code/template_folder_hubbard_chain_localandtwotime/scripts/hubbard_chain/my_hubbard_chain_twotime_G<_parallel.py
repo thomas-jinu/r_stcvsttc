@@ -703,7 +703,7 @@ for step_folder in "{run_folder_twotime}"/step_*; do
             --cpus-per-task={args.cpus_per_task} \\
             ./dmrg \\
             -f "input_twotime_{run_name}_evolve.ain" \\
-            -p f"{DMRG_PRECISION}" \\
+            -p "{DMRG_PRECISION}" \\
             "{TWOTIME_OPERATOR_LABEL}"
     ) &
 

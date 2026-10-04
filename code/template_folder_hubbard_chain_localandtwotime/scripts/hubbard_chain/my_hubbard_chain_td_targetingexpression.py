@@ -521,7 +521,7 @@ srun \\
     --cpus-per-task={args.cpus_per_task} \\
     ./dmrg \\
     -f "{input_path.name}" \\
-    -p f"{DMRG_PRECISION}" \\
+    -p "{DMRG_PRECISION}" \\
     "{operator_argument}"
 
 
