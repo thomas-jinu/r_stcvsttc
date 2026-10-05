@@ -213,7 +213,7 @@ def build_input_td(
                         f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
                         f'RestartFilename = "{restart_filename}";',
-                        "GsWeight = 0.0;",
+                        "GsWeight = 0.05;",
                     ]
                 ),
             ]
