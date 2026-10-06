@@ -142,10 +142,6 @@ def main() -> int:
     )
     print(f"Wrote Ainur input: {input_path}")
 
-    num_threads_per_task = int(
-        args.cpus_per_task / 4
-    )  # 4 is size of local hilbertspace in Hubbard entered as THREADS in input.
-
     # Generate batch script for NERSC if the cluster is set to 'nersc'.
     if args.cluster == "nersc":
         slurm_path = run_folder / f"batch_{run_name}.slurm"
@@ -170,7 +166,7 @@ module load cray-hdf5/1.14.3.7
 
 export CC=cc
 export CXX=CC
-export OMP_NUM_THREADS={num_threads_per_task}
+export OMP_NUM_THREADS={args.cpus_per_task}
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
 export BASE=/global/common/software/m5228
