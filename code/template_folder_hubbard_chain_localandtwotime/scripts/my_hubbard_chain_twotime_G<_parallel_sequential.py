@@ -32,7 +32,7 @@ DMRG_EXECUTABLES = {
 # DMRG Settings
 DMRG_PRECISION = 12
 
-TWOTIME_OPERATOR_LABEL = "<P2|c|P3>"
+TWOTIME_OPERATOR_LABEL = "<P2|c'|P3>"
 
 TWOTIME_COLLECTION_MARKER = "FiniteLoops printing ends"
 
@@ -192,7 +192,7 @@ def build_input_apply(
                         "];",
                         "RestartMapStages=0;",
                         "string P0 = |P0>;",
-                        f'string P1 = "c[{args.center_site}]\'*|P0>";',
+                        f'string P1 = "c[{args.center_site}]*|P0>";',
                     ]
                 ),
                 "\n".join(
@@ -545,6 +545,8 @@ def run_dmrg(
     )
 
 
+
+
 def run_one_step(
     step_folder: Path,
     input_path_apply: Path,
@@ -595,7 +597,7 @@ def main() -> int:
         raise FileNotFoundError(f"DMRG++ executable not found: {executable_path}")
 
     # Name file with pump frequency for clarity
-    run_folder_twotime = restart_path.parent / f"Gless_twotime_{run_name}"
+    run_folder_twotime = restart_path.parent / f"G<_twotime_{run_name}"
     run_folder_twotime.mkdir(parents=True, exist_ok=True)
     print(f"Created run folder: {run_folder_twotime}")
 
@@ -746,6 +748,7 @@ fi
 
 date
 """
+
         slurm_path.write_text(body, encoding="utf-8")
         print(f"Wrote batch script: {slurm_path}")
 
