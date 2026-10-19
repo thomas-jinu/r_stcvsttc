@@ -5,10 +5,10 @@ Generate and optionally run a two-time Hubbard-chain calculation.
 import argparse
 import csv
 import json
+import os
 import re
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-
-import numpy as np
 
 # Location of the current DMRG++ executables for different clusters. Adjust these paths as needed. The location is printed when the script is completed.
 DMRG_EXECUTABLES = {
@@ -53,12 +53,15 @@ def parse_args() -> argparse.Namespace:
         help="Only process an existing twotime_RUN_NAME directory.",
     )
     parser.add_argument(
-        "--append-to-name",
-        type=str,
-        default="",
-        help="Append this to the name of the output file.",
+        "--workers",
+        type=int,
+        default=os.cpu_count() or 1,
+        help="Number of output files to parse concurrently (default: CPU count).",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
+    return args
 
 
 def read_pump_file(pump_file_path: Path) -> tuple[list[float], list[float]]:
@@ -97,9 +100,13 @@ def find_evolve_output(step_folder: Path, run_name: str) -> Path:
     raise FileNotFoundError(f"No evolve output found in {step_folder}")
 
 
-def read_operator_output(output_path: Path) -> np.ndarray:
-    """Read operator data after ``FiniteLoops printing ends``."""
-    rows_by_key = {}
+def read_operator_output(output_path: Path) -> dict[tuple[int, float], complex]:
+    """Read operator data after ``FiniteLoops printing ends``.
+
+    A dictionary avoids creating an intermediate NumPy array only to iterate over
+    it later.  Its key also preserves the original "last occurrence wins" rule.
+    """
+    values = {}
     collecting = False
 
     with output_path.open("r", encoding="utf-8") as file:
@@ -115,22 +122,12 @@ def read_operator_output(output_path: Path) -> np.ndarray:
                 continue
 
             site_index = int(match.group(1))
-            real_part = float(match.group(2))
-            imaginary_part = float(match.group(3))
             time = float(match.group(4))
+            values[(site_index, time)] = complex(
+                float(match.group(2)), float(match.group(3))
+            )
 
-            # If the same site/time appears again, keep the last value.
-            rows_by_key[(site_index, time)] = [
-                site_index,
-                real_part,
-                imaginary_part,
-                time,
-            ]
-
-    if not rows_by_key:
-        return np.empty((0, 4), dtype=float)
-
-    return np.asarray(list(rows_by_key.values()), dtype=float)
+    return values
 
 
 def collect_twotime_data(
@@ -139,6 +136,7 @@ def collect_twotime_data(
     number_of_steps: int,
     time_axis: list[float],
     center_site: int,
+    workers: int,
 ) -> dict[tuple[float, float, int, int], complex]:
     """
     Return:
@@ -148,27 +146,37 @@ def collect_twotime_data(
 
     Repeated keys retain the last value.
     """
+    # Locate files before starting workers so missing-output errors remain clear.
+    output_paths = [
+        find_evolve_output(twotime_folder / f"step_{step:04d}", run_name)
+        for step in range(number_of_steps)
+    ]
     data = {}
+    if not output_paths:
+        return data
 
-    for step in range(number_of_steps):
-        step_folder = twotime_folder / f"step_{step:04d}"
-        output_path = find_evolve_output(step_folder, run_name)
-        step_data = read_operator_output(output_path)
+    # Parsing DMRG output is CPU-heavy (regular expressions and float conversion),
+    # so processes bypass the GIL. executor.map returns results in step order,
+    # retaining the original behavior if time_axis contains duplicate values.
+    max_workers = min(workers, number_of_steps)
+    if max_workers == 1:
+        parsed_steps = map(read_operator_output, output_paths)
+        executor = None
+    else:
+        executor = ProcessPoolExecutor(max_workers=max_workers)
+        chunk_size = max(1, number_of_steps // (max_workers * 4))
+        parsed_steps = executor.map(
+            read_operator_output, output_paths, chunksize=chunk_size
+        )
 
-        t_prime = float(time_axis[step])
-
-        for site, real_part, imaginary_part, t in step_data:
-            key = (
-                t_prime,
-                float(t),
-                int(center_site),
-                int(site),
-            )
-
-            data[key] = complex(
-                real_part,
-                imaginary_part,
-            )
+    try:
+        for step, step_data in enumerate(parsed_steps):
+            t_prime = float(time_axis[step])
+            for (site, time), value in step_data.items():
+                data[(t_prime, time, center_site, site)] = value
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
 
     return data
 
@@ -216,9 +224,9 @@ def process_twotime_results(
     base_directory: Path,
     run_name: str,
     number_of_steps: int,
-    time_axis,
+    time_axis: list[float],
     center_site: int,
-    append_to_name: str = "",
+    workers: int,
 ) -> Path:
     """Collect an existing run and write its combined CSV file."""
     twotime_folder = base_directory / f"{run_name}"
@@ -234,12 +242,10 @@ def process_twotime_results(
         number_of_steps=number_of_steps,
         time_axis=time_axis,
         center_site=center_site,
+        workers=workers,
     )
 
-    csv_path = (
-        base_directory
-        / f"{run_name}{append_to_name}_P2_c_P3_centersite={center_site}.csv"
-    )
+    csv_path = base_directory / f"{run_name}_P2_c_P3_centersite={center_site}.csv"
 
     save_twotime_csv(
         data=data,
@@ -262,7 +268,7 @@ def main() -> int:
         number_of_steps=len(time_axis),
         time_axis=time_axis,
         center_site=args.center_site,
-        append_to_name=args.append_to_name,
+        workers=args.workers,
     )
     print(f"Wrote post-processed data: {csv_path}")
     return 0

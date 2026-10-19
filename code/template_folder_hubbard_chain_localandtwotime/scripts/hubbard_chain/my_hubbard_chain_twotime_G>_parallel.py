@@ -664,9 +664,7 @@ module load cray-hdf5/1.14.3.7
 
 export CC=cc
 export CXX=CC
-export OMP_NUM_THREADS={args.cpus_per_task}
-export OMP_PROC_BIND=spread
-export OMP_PLACES=threads
+export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK}}"
 export BASE=/global/common/software/m5228
 export LOCAL="$BASE/local"
 
@@ -682,7 +680,6 @@ for step_folder in "{run_folder_twotime}"/step_*; do
 
         srun \\
             --exclusive \\
-            --nodes=1 \\
             --ntasks=1 \\
             --cpus-per-task={args.cpus_per_task} \\
             ./dmrg \\
@@ -693,12 +690,11 @@ for step_folder in "{run_folder_twotime}"/step_*; do
 
         srun \\
             --exclusive \\
-            --nodes=1 \\
             --ntasks=1 \\
             --cpus-per-task={args.cpus_per_task} \\
             ./dmrg \\
             -f "input_twotime_{run_name}_evolve.ain" \\
-            -p "{DMRG_PRECISION}" \\
+            -p f"{DMRG_PRECISION}" \\
             "{TWOTIME_OPERATOR_LABEL}"
     ) &
 

@@ -213,7 +213,7 @@ def build_input_td(
                         f'string RecoverySave = "%l%%2,@keep,@M={args.Pump_time_steps}";',
                         f'OutputFile = "{run_name}";',
                         f'RestartFilename = "{restart_filename}";',
-                        "GsWeight = 0.05;",
+                        "GsWeight = 0.0;",
                     ]
                 ),
             ]
@@ -483,6 +483,8 @@ def main() -> int:
     if args.cluster == "nersc":
         slurm_path = run_folder_td / f"batch_{run_name}.slurm"
 
+        physical_cores_per_task = int(args.cpus_per_task/2)  # Assuming hyperthreading, adjust as needed
+
         body = f"""#!/bin/bash
 #SBATCH --account=m5228
 #SBATCH --qos=shared
@@ -490,7 +492,7 @@ def main() -> int:
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task={args.cpus_per_task}
-#SBATCH --time=48:00:00
+#SBATCH --time=6:00:00
 #SBATCH --job-name=dmrg_frequency
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
@@ -502,21 +504,22 @@ module load cray-mpich/9.1.0
 module load cray-libsci/26.03.0
 module load cray-hdf5/1.14.3.7
 
+export SLURM_CPU_BIND="cores"
 
-export OMP_NUM_THREADS={args.cpus_per_task}
+export OMP_NUM_THREADS={physical_cores_per_task}
+export OMP_PLACES=cores   
 export OMP_PROC_BIND=spread
-export OMP_PLACES=threads
 
 cd "{run_folder_td}"
 
 srun \\
     --exclusive \\
-    --nodes=1 \\
+    --cpu-bind=cores \\
     --ntasks=1 \\
     --cpus-per-task={args.cpus_per_task} \\
     ./dmrg \\
     -f "{input_path.name}" \\
-    -p "{DMRG_PRECISION}" \\
+    -p f"{DMRG_PRECISION}" \\
     "{operator_argument}"
 
 
